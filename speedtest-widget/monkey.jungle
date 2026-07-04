@@ -1,0 +1,11 @@
+# Connect IQ build configuration for the Proxy Speed Test widget.
+# Mirrors the radar app's layout: shared resources are the base path, each device
+# folder is added only for its own product so launcher icons don't cross-override.
+
+project.manifest = manifest.xml
+
+base.sourcePath = source
+
+base.resourcePath = resources/shared
+edge1030plus.resourcePath = $(base.resourcePath);resources/edge1030plus
+edge1040.resourcePath = $(base.resourcePath);resources/edge1040

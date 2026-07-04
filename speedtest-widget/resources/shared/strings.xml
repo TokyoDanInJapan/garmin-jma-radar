@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string id="AppName">Proxy Speed Test</string>
+
+    <!-- Settings labels -->
+    <string id="SetProxyBase">Proxy URL</string>
+    <string id="SetProxyKey">Proxy key</string>
+</resources>

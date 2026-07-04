@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Connect IQ app settings UI. Lets users configure the widget from the Garmin
+  Connect mobile app / Connect IQ store without a rebuild. Each setting binds to
+  a property in properties.xml.
+-->
+<resources>
+    <settings>
+        <setting propertyKey="@Properties.proxyBase" title="@Strings.SetProxyBase">
+            <settingConfig type="alphaNumeric" maxLength="120"/>
+        </setting>
+        <setting propertyKey="@Properties.proxyKey" title="@Strings.SetProxyKey">
+            <settingConfig type="alphaNumeric" maxLength="120"/>
+        </setting>
+        <setting propertyKey="@Properties.zoom" title="@Strings.SetZoom">
+            <settingConfig type="numeric" min="4" max="11"/>
+        </setting>
+        <setting propertyKey="@Properties.frameCount" title="@Strings.SetFrameCount">
+            <settingConfig type="numeric" min="1" max="6"/>
+        </setting>
+    </settings>
+</resources>

@@ -1,0 +1,27 @@
+# Connect IQ build configuration for the JMA Rain Radar widget.
+#
+# Defines where the compiler finds the manifest, Monkey C source, and resources
+# (strings, app settings/properties). Stated explicitly here so CLI builds
+# (monkeyc -f monkey.jungle ...) resolve the same paths the VS Code Monkey C
+# extension uses.
+
+project.manifest = manifest.xml
+
+base.sourcePath = source
+
+# Resources live under resources/, organized as:
+#   resources/shared/          assets common to every device (strings, settings,
+#                              properties) - the base resource path.
+#   resources/<product>/       per-device assets (the launcher icon, whose size
+#                              differs: 36x36 edge1030plus, 40x40 edge1040).
+#
+# base.resourcePath recurses into every subdirectory it's pointed at with NO
+# per-device scoping, so it must point at shared/ only - pointing it at
+# resources/ would pull BOTH device folders into every build and silently let
+# one device's launcher icon override the other's. Each device folder is instead
+# added just for its own product below. (This replaces Connect IQ's
+# resources-<product> root-folder convention, which only auto-scopes at the
+# project root, not when nested under a resourcePath.)
+base.resourcePath = resources/shared
+edge1030plus.resourcePath = $(base.resourcePath);resources/edge1030plus
+edge1040.resourcePath = $(base.resourcePath);resources/edge1040

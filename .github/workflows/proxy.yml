@@ -1,0 +1,61 @@
+name: proxy
+
+# Build/test on every PR and push that touches the proxy; deploy to Cloudflare
+# Workers only on push to main. Widget-only changes don't trigger this.
+on:
+  push:
+    branches: [main]
+    paths: ['proxy/**', '.github/workflows/proxy.yml']
+  pull_request:
+    paths: ['proxy/**', '.github/workflows/proxy.yml']
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: proxy
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22            # wrangler v4 (4.103) requires Node 22+
+          cache: npm
+          cache-dependency-path: proxy/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck    # tsc --noEmit over the JS sources (checkJs)
+      - run: npm test
+      # Validate the Worker bundles and wrangler.toml parses (incl. the
+      # ratelimit binding). Local-only - needs no Cloudflare credentials.
+      - run: npx wrangler deploy --dry-run --outdir dist
+
+  deploy:
+    needs: test
+    # Deploy on push to main, or when manually triggered via "Run workflow".
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22            # wrangler v4 (4.103) requires Node 22+
+          cache: npm
+          cache-dependency-path: proxy/package-lock.json
+      - run: npm ci   # installs upng-js so wrangler can bundle it
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: proxy
+          wranglerVersion: "4.103.0"   # match the pinned devDependency
+          # Upload the Worker's PROXY_TOKEN from the GitHub secret on every
+          # deploy, so the deployed Worker's secret stays in sync with the
+          # value stored in GitHub (Settings → Secrets → Actions → PROXY_TOKEN).
+          secrets: |
+            PROXY_TOKEN
+        env:
+          PROXY_TOKEN: ${{ secrets.PROXY_TOKEN }}

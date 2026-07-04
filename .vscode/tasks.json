@@ -1,0 +1,96 @@
+{
+  // Shortcuts for the two halves of the repo: the radar-widget/ widget scripts and the
+  // proxy/ npm scripts. Run any with "Tasks: Run Task" (Ctrl+Shift+P) and pick
+  // from the list, or bind a key to workbench.action.tasks.runTask. The radar-widget
+  // tasks run on the host: build.sh / run-sim.sh re-enter the 'garmin' distrobox
+  // container themselves. The proxy tasks shell out to the npm scripts in
+  // proxy/package.json.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // One-time environment setup: container, SDK libs, SDK Manager, dev key.
+      // Interactive (needs sudo + a Garmin sign-in), so give it a real terminal.
+      "label": "Garmin: Setup",
+      "type": "shell",
+      "command": "./setup.sh",
+      "options": { "cwd": "${workspaceFolder}/radar-widget" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+    },
+    {
+      // Build the deployable store package (bin/RainRadar.iq). Default build task,
+      // so it also runs on Ctrl+Shift+B.
+      "label": "Garmin: Build",
+      "type": "shell",
+      "command": "./build.sh",
+      "options": { "cwd": "${workspaceFolder}/radar-widget" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      // Build with .env secrets baked in and copy onto a connected Edge over USB.
+      "label": "Garmin: Deploy to device",
+      "type": "shell",
+      "command": "./deploy-device.sh",
+      "options": { "cwd": "${workspaceFolder}/radar-widget" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+    },
+    {
+      // Build and launch the Connect IQ simulator, then stream the device console.
+      // Long-running (tails the console until you stop it).
+      "label": "Garmin: Run simulator",
+      "type": "shell",
+      "command": "./run-sim.sh",
+      "options": { "cwd": "${workspaceFolder}/radar-widget" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+    },
+    {
+      // Run the Worker locally with `wrangler dev` (hot reload). Reads local
+      // secrets (PROXY_TOKEN) from proxy/.dev.vars - see .dev.vars.example.
+      // Long-running, so mark it background.
+      "label": "Proxy: Dev",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/proxy" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+    },
+    {
+      // Run the proxy unit tests (node --test). Default test task: Ctrl+Shift+P >
+      // "Tasks: Run Test Task".
+      "label": "Proxy: Test",
+      "type": "shell",
+      "command": "npm test",
+      "options": { "cwd": "${workspaceFolder}/proxy" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      // Type-check the JS sources (tsc --noEmit over checkJs). Mirrors the
+      // typecheck step the proxy CI runs.
+      "label": "Proxy: Typecheck",
+      "type": "shell",
+      "command": "npm run typecheck",
+      "options": { "cwd": "${workspaceFolder}/proxy" },
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      // Deploy the Worker to Cloudflare (`wrangler deploy`). Needs an authorized
+      // wrangler (npx wrangler login) - normally CI deploys on push to main, so
+      // use this for manual/out-of-band deploys.
+      "label": "Proxy: Deploy",
+      "type": "shell",
+      "command": "npm run deploy",
+      "options": { "cwd": "${workspaceFolder}/proxy" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+# Local secret scanning before each commit. One-time setup:
+#
+#   pipx install pre-commit      # or: brew install pre-commit / pip install pre-commit
+#   pre-commit install           # installs the git hook into this clone
+#
+# Thereafter every `git commit` scans the staged changes with gitleaks and aborts
+# the commit if a secret is detected (using .gitleaks.toml). This is the earliest
+# catch -- it stops a secret before it ever enters a commit. CI runs the same scan
+# (.github/workflows/secret-scan.yml), so the check is enforced even for clones
+# that haven't run `pre-commit install`.
+#
+# Run on demand against the whole repo:  pre-commit run gitleaks --all-files
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

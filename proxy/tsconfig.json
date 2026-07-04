@@ -1,0 +1,22 @@
+{
+  // Type-checks the plain-JS Worker source via JSDoc (no emit, no TS files).
+  // Run with `npm run typecheck`. Tests and dev scripts are intentionally out of
+  // scope - only the deployed Worker code is checked.
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    // checkJs with null-safety, but implicit-any is allowed for un-annotated
+    // private helpers - exported APIs carry JSDoc types; internals stay terse.
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.js", "types/**/*.d.ts"]
+}

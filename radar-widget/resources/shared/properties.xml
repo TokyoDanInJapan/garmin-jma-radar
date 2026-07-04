@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Persistent app properties (defaults). Editable from the Garmin Connect /
+  Connect IQ app via settings.xml, read at runtime via Application.Properties.
+-->
+<properties>
+    <!-- Your deployed Cloudflare Worker base URL (no trailing slash). -->
+    <property id="proxyBase" type="string">https://jma-rain-radar-proxy.YOURNAME.workers.dev</property>
+    <!-- Shared secret matching the proxy's PROXY_TOKEN. Sent as ?key=. -->
+    <property id="proxyKey" type="string"></property>
+    <!-- Tile zoom: 4 (widest) .. 11 (street). 12+ has no JMA/GSI tiles.
+         Default 8 = Local. The on-screen buttons pick 6 (Wide) or 8 (Local). -->
+    <property id="zoom" type="number">8</property>
+    <!-- Animation frames to request, 1..6 (6 = max; a 7th OOMs the device).
+         This is the Wi-Fi maximum: on Wi-Fi all of them load fast. Over Bluetooth
+         the app throttles to 3 (BLE_FRAME_CAP) on its own, since image pulls are
+         very slow there (~27s each via Garmin's image service). The proxy keeps
+         the highest-priority frames: now, then +60, +30, +45, +15, -15. -->
+    <property id="frameCount" type="number">6</property>
+</properties>

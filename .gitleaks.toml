@@ -1,0 +1,50 @@
+# gitleaks config for garmin-jma-radar.
+# Run by the pre-commit hook (.pre-commit-config.yaml) and CI
+# (.github/workflows/secret-scan.yml). gitleaks auto-loads this file from the
+# repo root.
+#
+# Why a custom config: the only bespoke secret here is the proxy's shared token
+# (PROXY_TOKEN on the Worker; the same value is the widget's proxyKey / PROXY_KEY,
+# sent as ?key=). It's a bare random hex string with no provider signature, so the
+# stock rules can miss it. The rules below pin the exact places it could leak:
+#   - build.sh bakes it into radar-widget/resources/shared/properties.xml during a build
+#     (id="proxyKey" ...>VALUE<) and restores the file afterward -- a mistimed
+#     `git add` is the realistic accident this guards against;
+#   - .env / .dev.vars style assignments (PROXY_TOKEN=..., PROXY_KEY=...);
+#   - a token pasted into a URL (...?key=...).
+# Cloudflare API tokens etc. are covered by the bundled default ruleset.
+
+title = "garmin-jma-radar secret scan"
+
+[extend]
+useDefault = true   # keep all of gitleaks' built-in provider rules (Cloudflare, AWS, generic API keys, ...)
+
+# --- Custom rules -----------------------------------------------------------
+
+# PROXY_TOKEN / PROXY_KEY / proxyKey assignment, or a ?key= URL param, followed by
+# a long hex (>=32, covers `openssl rand -hex 16` and -hex 32) or base64-ish value.
+[[rules]]
+id = "jma-proxy-token-assignment"
+description = "JMA radar proxy shared secret in an assignment or URL param"
+regex = '''(?i)(proxy[_-]?token|proxy[_-]?key|x-proxy-key|[?&]key)["']?\s*[=:]\s*["']?([0-9a-f]{32,}|[A-Za-z0-9+/]{40,}={0,2})'''
+keywords = ["proxy_token", "proxytoken", "proxy-key", "proxykey", "x-proxy-key", "key="]
+
+# The same secret baked into the Connect IQ properties.xml as element text:
+#   <property id="proxyKey" type="string">DEADBEEF...</property>
+[[rules]]
+id = "jma-proxy-token-properties-xml"
+description = "JMA radar proxy shared secret baked into properties.xml"
+regex = '''(?i)id=["']proxy(key|token)["'][^>]{0,40}>\s*([0-9a-f]{32,})'''
+keywords = ["proxykey", "proxytoken"]
+
+# --- Allowlist: committed templates and documented placeholders -------------
+[allowlist]
+description = "Ignore example templates and documented placeholder tokens"
+paths = [
+  '''.*\.example$''',          # radar-widget/.env.example, proxy/.dev.vars.example
+]
+regexes = [
+  '''YOURNAME''',              # placeholder host in PROXY_BASE
+  '''dev-local-token''',       # placeholder in .dev.vars.example
+  '''<your-token>''',          # README placeholders
+]

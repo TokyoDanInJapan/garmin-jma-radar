@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string id="AppName">Rain Radar JP</string>
+
+    <!-- Settings labels -->
+    <string id="SetProxyBase">Proxy URL</string>
+    <string id="SetProxyKey">Proxy key</string>
+    <string id="SetZoom">Zoom (4-11)</string>
+    <string id="SetFrameCount">Frames (1-6)</string>
+</resources>

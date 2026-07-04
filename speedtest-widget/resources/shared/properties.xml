@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Persistent app properties (defaults). The proxy URL + key match the radar app's;
+  build.sh bakes them in from ../radar-widget/.env so the dev build needs no manual setup.
+  Editable from Garmin Connect (see settings.xml) for store/sideload installs.
+-->
+<properties>
+    <property id="proxyBase" type="string">https://jma-rain-radar-proxy.YOURNAME.workers.dev</property>
+    <property id="proxyKey" type="string"></property>
+</properties>

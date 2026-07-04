@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!--
+  Connect IQ manifest for the Proxy Speed Test widget - a diagnostic companion to
+  the Rain Radar widget. It repeatedly times a /frames JSON request (makeWebRequest)
+  and a /tile image request (makeImageRequest) against the same proxy, to compare
+  the two transport paths in real time (the image path goes via Garmin's image
+  service and is the one that struggles over Bluetooth).
+
+  Permissions:
+    Communications - HTTP JSON + image requests via the phone (Edge has no cell)
+  No Positioning: the test uses a fixed location, so no GPS is needed.
+
+  This is a SEPARATE app from the radar (distinct application id), so it installs
+  alongside it.
+-->
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+  <iq:application
+      id="0f2bee81e3e74fffbbc0ee92f97e5259"
+      type="widget"
+      name="@Strings.AppName"
+      entry="SpeedTestApp"
+      launcherIcon="@Drawables.LauncherIcon"
+      minSdkVersion="3.2.0">
+
+    <iq:products>
+      <iq:product id="edge1030plus"/>
+      <iq:product id="edge1040"/>
+    </iq:products>
+
+    <iq:permissions>
+      <iq:uses-permission id="Communications"/>
+    </iq:permissions>
+
+    <iq:languages>
+      <iq:language>eng</iq:language>
+    </iq:languages>
+  </iq:application>
+</iq:manifest>

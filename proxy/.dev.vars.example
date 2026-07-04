@@ -1,0 +1,10 @@
+# Local secrets for `wrangler dev` (npm run dev). Copy to .dev.vars and fill in.
+# .dev.vars is gitignored; this .example is the committed template.
+#
+# In production these are set as Wrangler secrets instead
+# (npx wrangler secret put PROXY_TOKEN), not from this file.
+
+# Shared secret the proxy requires on every request (sent by the widget as ?key=).
+# Pick any hard-to-guess string; the widget's PROXY_KEY / radar-widget/.env must match it.
+# Without it the Worker fails closed (returns 401).
+PROXY_TOKEN=dev-local-token

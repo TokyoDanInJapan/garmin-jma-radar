@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lets users set the proxy URL/key from Garmin Connect without a rebuild. -->
+<resources>
+    <settings>
+        <setting propertyKey="@Properties.proxyBase" title="@Strings.SetProxyBase">
+            <settingConfig type="alphaNumeric" maxLength="120"/>
+        </setting>
+        <setting propertyKey="@Properties.proxyKey" title="@Strings.SetProxyKey">
+            <settingConfig type="alphaNumeric" maxLength="120"/>
+        </setting>
+    </settings>
+</resources>
