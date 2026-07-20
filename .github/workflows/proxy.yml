@@ -10,6 +10,9 @@ on:
     paths: ['proxy/**', '.github/workflows/proxy.yml']
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: proxy
