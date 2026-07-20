@@ -41,6 +41,9 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
       || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Cloudflare credentials live in this environment's secrets; its branch
+    # policy only allows deployments from main.
+    environment: production
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -54,7 +57,10 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: proxy
-          wranglerVersion: "4.103.0"   # match the pinned devDependency
+          # No wranglerVersion: the action uses the wrangler that `npm ci`
+          # installed from package-lock.json, so Dependabot keeps wrangler and
+          # @cloudflare/workers-types moving in lockstep with one source of
+          # truth (the drifting hardcoded pin is what broke the deploy).
           # Upload the Worker's PROXY_TOKEN from the GitHub secret on every
           # deploy, so the deployed Worker's secret stays in sync with the
           # value stored in GitHub (Settings → Secrets → Actions → PROXY_TOKEN).
