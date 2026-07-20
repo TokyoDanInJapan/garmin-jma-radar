@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # wrangler 4.x peer-depends on @cloudflare/workers-types ^4; the 5.x
+      # major breaks wrangler-action's install during deploy. Drop this rule
+      # once wrangler's peer range accepts 5.x.
+      - dependency-name: "@cloudflare/workers-types"
+        versions: [">=5"]
     groups:
       npm-dependencies:
         patterns:
