@@ -230,6 +230,7 @@ async function handleTile(url, env, ctx) {
 // Lazily-rendered, per-isolate cache of the fixed speed-test asset. The
 // pattern is deterministic, so every isolate (and every deploy) serves
 // byte-identical bytes.
+/** @type {Uint8Array | null} */
 let speedtestBytes = null;
 
 /**
