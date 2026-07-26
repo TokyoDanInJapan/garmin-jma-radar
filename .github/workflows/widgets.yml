@@ -33,6 +33,13 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # GitHub sets HOME=/github/home in container jobs, but monkeyc is a Java
+      # program and resolves its SDK/device root from the passwd entry for uid 0
+      # -- i.e. /root. Left alone, the toolchain installs to /github/home and the
+      # compiler looks in /root, which surfaces as "Invalid device id" rather
+      # than anything about paths. Pin both to the same place.
+      HOME: /root
 
     steps:
       # Runs before checkout on purpose: the bare image has no git, and without

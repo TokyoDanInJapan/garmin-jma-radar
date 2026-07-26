@@ -31,6 +31,10 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # See widgets.yml: monkeyc resolves its SDK/device root to /root, while
+      # container jobs default HOME to /github/home.
+      HOME: /root
 
     steps:
       - name: Install toolchain dependencies

@@ -114,7 +114,25 @@ if [[ ! -f "$key" ]]; then
     rm -f /tmp/ci-key.pem
 fi
 
+# --- Sanity: will the compiler look where we installed? ---------------------
+# monkeyc is a Java program and resolves its SDK/device root from the passwd
+# entry for the current uid, not from $HOME. When those disagree -- which they
+# do by default in a GitHub container job, where HOME=/github/home while uid 0's
+# passwd home is /root -- every build fails with "Invalid device id: <device>",
+# which says nothing about paths. Catch it here instead.
+passwd_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+if [[ -n "$passwd_home" && "$passwd_home" != "$HOME" ]]; then
+    echo >&2
+    echo "ERROR: \$HOME ($HOME) differs from the passwd home for uid $(id -u)" >&2
+    echo "       ($passwd_home). The toolchain is installed under \$HOME, but" >&2
+    echo "       monkeyc will look under $passwd_home and report every device as" >&2
+    echo "       an invalid device id." >&2
+    echo "       Set HOME=$passwd_home for the job (see .github/workflows/widgets.yml)." >&2
+    exit 1
+fi
+
 say "Connect IQ $SDK_VERSION ready"
+echo "HOME:    $HOME"
 echo "SDK:     $sdk_dir"
 echo "Devices: ${devices[*]}"
 echo "Key:     $key"
