@@ -3,3 +3,5 @@ radar-widget/bin
 .env
 radar-widget/.env
 bin/
+# Generated sample frames (proxy/scripts/gen-samples.mjs)
+samples/

@@ -170,9 +170,13 @@ if [[ -z "${CIQ_NO_SIM_UPDATE:-}" ]] && pgrep -x simulator >/dev/null 2>&1; then
                 echo "Sim:    compiling $sim_device .prg for the running simulator..."
                 build_prg "$sim_device" "$prg"
             fi
+            # The sim names the .SET after the uppercased .prg basename, not the
+            # AppName -- see the longer note in radar-widget/build.sh. Stripping
+            # the "-<device>" suffix here meant the file was never found and
+            # stale settings were never actually cleared.
             if [[ "$baked" -eq 1 ]]; then
                 tmpbase="${TMPDIR:-/tmp}"
-                setname="$(basename "$prg")"; setname="${setname%.*}"; setname="${setname%-$sim_device}"
+                setname="$(basename "$prg")"; setname="${setname%.*}"
                 setname="$(printf '%s' "$setname" | tr '[:lower:]' '[:upper:]').SET"
                 setpath="$tmpbase/com.garmin.connectiq/GARMIN/APPS/SETTINGS/$setname"
                 [[ -f "$setpath" ]] && { rm -f "$setpath"; echo "Sim:    cleared stored settings override $setname"; }

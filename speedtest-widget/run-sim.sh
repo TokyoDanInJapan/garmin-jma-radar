@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 #
-# Build the JMA Rain Radar widget and launch it in the Connect IQ simulator.
+# Build the Proxy Speed Test widget and launch it in the Connect IQ simulator.
 # Linux + macOS.
 #
+# Mirrors radar-widget/run-sim.sh, minus the GPS handling: this widget only
+# declares the Communications permission, so there is no position to simulate.
+#
 # Locates the installed Connect IQ SDK, builds a single-device .prg (via
-# build.sh, which also bakes in PROXY_BASE/PROXY_KEY from .env), starts the
-# simulator host (connectiq) if it isn't already running, then side-loads the
-# app with monkeydo and streams the device console. If a sim is already up it's
-# reused (a forced restart wedges the SDK's debug port); to reload into an open
-# sim you can also just run build.sh.
+# build.sh, which also bakes in PROXY_BASE/PROXY_KEY from the radar widget's
+# .env), starts the simulator host (connectiq) if it isn't already running, then
+# side-loads the app with monkeydo and streams the device console. If a sim is
+# already up it's reused (a forced restart wedges the SDK's debug port); to
+# reload into an open sim you can also just run build.sh.
 #
 # Run from anywhere; paths are resolved relative to this script.
 #
@@ -16,18 +19,13 @@
 #   -d, --device <id>   Target device id (matches a <product> in manifest.xml).
 #                       Default: edge1030plus.
 #   -k, --key <path>    Developer key (.der/PKCS8). Default: ../developer_key.
-#       --lat <deg>     Simulated GPS latitude.  Default: 35.681236 (Tokyo).
-#       --lon <deg>     Simulated GPS longitude. Default: 139.767125 (Tokyo).
-#                       GPS only applies on a COLD start (the sim rewrites its
-#                       config on exit); if already running, use Simulation >
-#                       GPS/Position in the UI.
-#   -e, --env <path>    .env with secrets to bake in. Default: ./.env.
+#   -e, --env <path>    .env with secrets to bake in.
+#                       Default: ../radar-widget/.env (shared with the radar app).
 #   -h, --help          Show this help.
 #
 # Examples:
 #   ./run-sim.sh
 #   ./run-sim.sh -d edge1040
-#   ./run-sim.sh --lat 34.6937 --lon 135.5023   # Osaka
 #
 set -euo pipefail
 
@@ -48,9 +46,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- Defaults ---------------------------------------------------------------
 device="edge1030plus"
 key="$here/../developer_key.der"; [ -f "$key" ] || key="$here/../developer_key"
-lat="35.681236"
-lon="139.767125"
-envfile="$here/.env"
+envfile="$here/../radar-widget/.env"
 port=1234
 
 usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
@@ -59,8 +55,6 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -d|--device) device="$2"; shift 2 ;;
         -k|--key)    key="$2"; shift 2 ;;
-        --lat)       lat="$2"; shift 2 ;;
-        --lon)       lon="$2"; shift 2 ;;
         -e|--env)    envfile="$2"; shift 2 ;;
         -h|--help)   usage 0 ;;
         *) echo "Unknown argument: $1" >&2; usage 1 ;;
@@ -80,7 +74,7 @@ if ! command -v monkeydo >/dev/null 2>&1; then
     fi
     if [[ -z "$sdk" || ! -d "$sdk/bin" ]]; then
         echo "Connect IQ SDK not found. Install it via the SDK Manager and put its" >&2
-        echo "bin/ on PATH (see README, 'Installing the Connect IQ SDK on Ubuntu')." >&2
+        echo "bin/ on PATH (see docs/connect-iq-sdk.md)." >&2
         exit 1
     fi
     export PATH="$sdk/bin:$PATH"
@@ -93,7 +87,7 @@ echo "Key:    $key"
 # --- Build (delegates to build.sh: SDK + .env injection + restore) ----------
 # CIQ_NO_SIM_UPDATE=1: build.sh auto-loads into an already-open sim, but run-sim
 # launches its own fresh sim and loads below, so suppress build.sh's load here.
-out="$here/bin/RainRadar.prg"
+out="$here/bin/SpeedTest.prg"
 echo
 echo "Building..."
 CIQ_NO_SIM_UPDATE=1 "$here/build.sh" -d "$device" -o "$out" -k "$key" -e "$envfile"
@@ -101,8 +95,8 @@ CIQ_NO_SIM_UPDATE=1 "$here/build.sh" -d "$device" -o "$out" -k "$key" -e "$envfi
 # --- Clear the simulator's stored app settings (so baked .env values win) ---
 # The sim persists app settings in a .SET file that OVERRIDES the property
 # defaults compiled into the .prg. A stale entry (e.g. an empty proxyKey) would
-# silently shadow what we just baked in, causing auth failures. Delete it; the
-# sim recreates it from the build's defaults on load.
+# silently shadow what we just baked in, causing auth failures. The file is named
+# after the uppercased .prg basename (SpeedTest.prg -> SPEEDTEST.SET).
 tmpbase="${TMPDIR:-/tmp}"
 setname="$(basename "$out")"; setname="${setname%.*}"
 setname="$(printf '%s' "$setname" | tr '[:lower:]' '[:upper:]').SET"
@@ -115,52 +109,15 @@ fi
 # --- Launch the simulator (if it isn't already up) --------------------------
 # run-sim.sh's job is to bring the simulator up with the app loaded; build.sh is
 # the one that loads into an already-open sim. If a sim is already running we
-# reuse it (load into it below) rather than killing it: a hard kill leaves the
-# Connect IQ host in an "unclean shutdown" state that wedges the debug port on
-# the next launch, so a forced cold-restart is unreliable. To get a truly fresh
-# sim (e.g. to re-apply GPS), close it from its own window first, then run this.
-sim_running() { pgrep -x simulator >/dev/null 2>&1; }
-sim_was_running=0
-sim_running && sim_was_running=1
-
-# --- Set the simulated GPS position (cold start only) ------------------------
-# The sim stores its last position in simulator.ini as Garmin semicircles
-# (degrees * 2^31 / 180), read on launch and overwritten on exit, so writing it
-# only sticks when we're the ones starting the sim.
-if [[ "$sim_was_running" -eq 0 ]]; then
-    sim_ini="$HOME/.Garmin/ConnectIQ/simulator.ini"
-    lat_semi="$(awk -v v="$lat" 'BEGIN{printf "%.0f", v*2147483648/180}')"
-    lon_semi="$(awk -v v="$lon" 'BEGIN{printf "%.0f", v*2147483648/180}')"
-    set_ini_key() { # file key value
-        local f="$1" k="$2" v="$3"
-        # ${k} rather than $k: "$k[" reads as an array subscript, both to bash's
-        # parser and to anyone skimming the regex.
-        if [[ -f "$f" ]] && grep -qE "^[[:space:]]*${k}[[:space:]]*=" "$f"; then
-            if sed --version >/dev/null 2>&1; then
-                sed -i -E "s|^[[:space:]]*${k}[[:space:]]*=.*|$k=$v|" "$f"
-            else
-                sed -i '' -E "s|^[[:space:]]*${k}[[:space:]]*=.*|$k=$v|" "$f"
-            fi
-        else
-            printf '%s=%s\n' "$k" "$v" >> "$f"
-        fi
-    }
-    mkdir -p "$(dirname "$sim_ini")"; touch "$sim_ini"
-    set_ini_key "$sim_ini" PositionLatitude  "$lat_semi"
-    set_ini_key "$sim_ini" PositionLongitude "$lon_semi"
-    echo "GPS:    lat $lat lon $lon (simulator.ini)"
+# reuse it rather than killing it: a hard kill leaves the Connect IQ host in an
+# "unclean shutdown" state that wedges the debug port on the next launch.
+if pgrep -x simulator >/dev/null 2>&1; then
+    echo
+    echo "Simulator already running; loading the new build into it."
 else
-    echo "GPS:    not set (simulator already running; use Simulation > GPS/Position)"
-fi
-
-# --- Start the simulator host (if not already running) ----------------------
-if [[ "$sim_was_running" -eq 0 ]]; then
     echo
     echo "Starting simulator..."
     ( connectiq >/dev/null 2>&1 & )   # detached; survives this script
-else
-    echo
-    echo "Simulator already running; loading the new build into it."
 fi
 
 # --- Wait for the simulator's debug port to be LISTENING --------------------
@@ -190,7 +147,7 @@ sleep 2   # the port can flap briefly right after first appearing; let it settle
 # observation window with no 'Unable to connect'". Failure prints that and exits
 # (can take ~5-6s), so observe a bit longer before trusting an "alive" reading.
 echo "Loading app into simulator..."
-mdlog="$tmpbase/rainradar-monkeydo.log"
+mdlog="$tmpbase/speedtest-monkeydo.log"
 mderr="$mdlog.err"
 loaded=0
 mdpid=""
@@ -219,8 +176,7 @@ disown "$mdpid" 2>/dev/null || true   # let it survive the script exit
 echo "App loaded (monkeydo PID $mdpid)."
 
 echo
-echo "In the simulator set App Settings (Proxy URL + key) and a Japan GPS fix"
-echo "(Simulation > GPS/Position, e.g. lat 35.68 lon 139.76)."
+echo "In the simulator set App Settings (Proxy URL + key), then run a test."
 
 # --- Stream the device console to this terminal -----------------------------
 # monkeydo keeps running in the background, appending the device console to

@@ -1,0 +1,123 @@
+name: release
+
+# Tag a release and attach the built widget packages, so there is a record of
+# which commit is on a device or in the Connect IQ Store. The proxy is not
+# versioned this way -- it deploys continuously from main.
+#
+#   git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build a release for (e.g. v0.2.0)'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CIQ_SDK_VERSION: '9.2.0'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    permissions:
+      contents: write      # create the release and upload assets
+    # Container jobs default to `sh -e {0}`, not bash; the steps below use
+    # `[[ ]]` and `set -o pipefail`.
+    defaults:
+      run:
+        shell: bash
+    env:
+      # See widgets.yml: monkeyc resolves its SDK/device root to /root, while
+      # container jobs default HOME to /github/home.
+      HOME: /root
+
+    steps:
+      - name: Install toolchain dependencies
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            ca-certificates curl git jq unzip openssl openjdk-17-jre-headless
+          rm -rf /var/lib/apt/lists/*
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.Garmin/ConnectIQ/Sdks
+            ~/.Garmin/ConnectIQ/Devices
+          key: ciq-${{ env.CIQ_SDK_VERSION }}-${{ hashFiles('.github/scripts/install-connectiq.sh') }}
+
+      - name: Install Connect IQ toolchain
+        run: .github/scripts/install-connectiq.sh edge1030plus edge1040
+
+      - name: Add SDK to PATH
+        run: echo "$(cat ~/.Garmin/ConnectIQ/current-sdk.cfg)/bin" >> "$GITHUB_PATH"
+
+      # A Connect IQ Store listing is bound to the developer key that first
+      # published it, so a Store-uploadable .iq must be signed with the real one.
+      # With the secret set we produce exactly that; without it we still build,
+      # but only for sideloading -- and say so in the release notes rather than
+      # shipping something that looks Store-ready and isn't.
+      - name: Resolve signing key
+        id: key
+        env:
+          DEVELOPER_KEY: ${{ secrets.GARMIN_DEVELOPER_KEY }}
+        run: |
+          if [[ -n "$DEVELOPER_KEY" ]]; then
+            printf '%s' "$DEVELOPER_KEY" | base64 -d > /tmp/release-key.der
+            echo "path=/tmp/release-key.der" >> "$GITHUB_OUTPUT"
+            echo "store_ready=true" >> "$GITHUB_OUTPUT"
+            echo "Signing with the repository developer key."
+          else
+            echo "path=$HOME/.Garmin/ConnectIQ/ci-key.der" >> "$GITHUB_OUTPUT"
+            echo "store_ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GARMIN_DEVELOPER_KEY is not set; packages are sideload-only."
+          fi
+
+      - name: Build store packages
+        env:
+          KEY: ${{ steps.key.outputs.path }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for widget in radar-widget speedtest-widget; do
+            (cd "$widget" && monkeyc -e -r -w -l 1 -f monkey.jungle \
+               -o "../dist/$widget.iq" -y "$KEY")
+          done
+          ls -la dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          STORE_READY: ${{ steps.key.outputs.store_ready }}
+        run: |
+          set -euo pipefail
+          if [[ "$STORE_READY" == "true" ]]; then
+            note='Signed with the project developer key -- uploadable to the Connect IQ Store.'
+          else
+            note='**Sideload only.** Built with an ephemeral CI key because the GARMIN_DEVELOPER_KEY secret is not configured, so these cannot be uploaded to the Connect IQ Store as an update.'
+          fi
+          {
+            echo "Widget packages built from \`$TAG\`."
+            echo
+            echo "$note"
+            echo
+            echo "See [CHANGELOG.md](CHANGELOG.md) for what changed."
+          } > /tmp/notes.md
+
+          # Idempotent: re-running workflow_dispatch on the same tag replaces assets.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.iq --clobber
+          else
+            gh release create "$TAG" dist/*.iq \
+              --title "$TAG" --notes-file /tmp/notes.md
+          fi

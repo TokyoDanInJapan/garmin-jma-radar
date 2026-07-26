@@ -1,6 +1,11 @@
 name = "jma-rain-radar-proxy"
 main = "src/index.js"
-compatibility_date = "2024-09-01"
+# Pins the Workers runtime semantics. Bump deliberately and redeploy behind the
+# /health smoke test -- it changes runtime behaviour, so it is not a routine
+# dependency update. This Worker only uses long-stable primitives (fetch, the
+# Cache API, Response, AbortSignal), which is why the jump from 2024-09-01 was
+# safe.
+compatibility_date = "2026-07-01"
 
 # If you adopt @cf-wasm/photon, no extra binding is needed (it ships WASM).
 # For persistent tile storage beyond the edge cache, add an R2 bucket:

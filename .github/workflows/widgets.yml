@@ -1,0 +1,133 @@
+name: widgets
+
+# Build and unit-test both Connect IQ widgets. Until this existed, roughly half
+# the codebase -- ~2,000 lines of Monkey C, including 48 unit tests -- was only
+# ever checked by hand on a developer machine.
+#
+# Deliberately NOT path-filtered on pull_request: a required status check that
+# never runs on an unrelated PR blocks that PR forever. Scoping it to
+# radar-widget/** would do exactly that. The SDK is cached, so a no-op run is
+# cheap.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with the SDK developers install locally (README, section 2).
+  CIQ_SDK_VERSION: '9.2.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The simulator links libwebkit2gtk-4.0 / libjavascriptcoregtk-4.0, which
+    # Ubuntu dropped after 22.04 -- the same reason setup.sh provisions a 22.04
+    # distrobox for local development. ubuntu-latest alone cannot run it.
+    container: ubuntu:22.04
+    # Container jobs default to `sh -e {0}`, not bash, so `set -o pipefail` and
+    # `[[ ]]` in the steps below would fail to parse.
+    defaults:
+      run:
+        shell: bash
+    env:
+      # GitHub sets HOME=/github/home in container jobs, but monkeyc is a Java
+      # program and resolves its SDK/device root from the passwd entry for uid 0
+      # -- i.e. /root. Left alone, the toolchain installs to /github/home and the
+      # compiler looks in /root, which surfaces as "Invalid device id" rather
+      # than anything about paths. Pin both to the same place.
+      HOME: /root
+
+    steps:
+      # Runs before checkout on purpose: the bare image has no git, and without
+      # it actions/checkout silently degrades to a REST tarball download.
+      - name: Install toolchain dependencies
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            ca-certificates curl git jq unzip openssl \
+            openjdk-17-jre-headless \
+            libwebkit2gtk-4.0-37 libusb-1.0-0 libsm6 \
+            xvfb procps
+          rm -rf /var/lib/apt/lists/*
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 310 MB of SDK plus the device profiles. Caching turns a ~310 MB download
+      # into a cache restore; the key covers the installer script, so bumping the
+      # SDK version or the pinned device archive invalidates it.
+      - name: Cache Connect IQ SDK and device profiles
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.Garmin/ConnectIQ/Sdks
+            ~/.Garmin/ConnectIQ/Devices
+          key: ciq-${{ env.CIQ_SDK_VERSION }}-${{ hashFiles('.github/scripts/install-connectiq.sh') }}
+
+      - name: Install Connect IQ toolchain
+        run: .github/scripts/install-connectiq.sh edge1030plus edge1040
+
+      - name: Add SDK to PATH
+        run: echo "$(cat ~/.Garmin/ConnectIQ/current-sdk.cfg)/bin" >> "$GITHUB_PATH"
+
+      # Every <iq:product> in each manifest, at typecheck level 1 with warnings
+      # treated as errors. Both widgets are clean at -w today, so any new warning
+      # is a regression. Levels 2 and 3 currently surface ~360 "untyped member"
+      # findings across the two widgets -- worth doing, but it is an annotation
+      # project, not a gate we can turn on now (see CONTRIBUTING.md).
+      - name: Compile widgets (all products, warnings are errors)
+        run: |
+          set -euo pipefail
+          key=~/.Garmin/ConnectIQ/ci-key.der
+          status=0
+          for widget in radar-widget speedtest-widget; do
+            devices=$(sed -nE 's/.*<iq:product id="([^"]+)".*/\1/p' "$widget/manifest.xml")
+            for device in $devices; do
+              echo "::group::$widget -> $device"
+              log=$(mktemp)
+              if ! (cd "$widget" && monkeyc -d "$device" -w -l 1 \
+                      -f monkey.jungle -o "bin/ci-$device.prg" -y "$key") >"$log" 2>&1; then
+                status=1
+              fi
+              cat "$log"
+              if grep -qE '^(WARNING|ERROR)' "$log"; then
+                echo "::error::$widget/$device produced compiler diagnostics"
+                status=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit $status
+
+      # (:test) functions are compiled in only by --unit-test, so this is a
+      # second build. It is not held to the zero-warning bar above: the test
+      # sources trip "cannot determine container type" on their fixture literals.
+      - name: Build unit-test programs
+        run: |
+          set -euo pipefail
+          key=~/.Garmin/ConnectIQ/ci-key.der
+          for widget in radar-widget speedtest-widget; do
+            (cd "$widget" && monkeyc -d edge1040 -l 1 --unit-test \
+               -f monkey.jungle -o bin/ci-test.prg -y "$key")
+          done
+
+      - name: Run Monkey C unit tests
+        run: |
+          set -euo pipefail
+          for widget in radar-widget speedtest-widget; do
+            echo "::group::$widget unit tests"
+            .github/scripts/run-ciq-tests.sh "$widget/bin/ci-test.prg" edge1040
+            echo "::endgroup::"
+          done
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: widget-prgs
+          path: '*/bin/ci-*.prg'
+          if-no-files-found: warn
+          retention-days: 7

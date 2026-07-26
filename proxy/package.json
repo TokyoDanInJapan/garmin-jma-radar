@@ -6,12 +6,20 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "coverage": "node --test --experimental-test-coverage"
+    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude=test/** --test-coverage-lines=98 --test-coverage-branches=90 --test-coverage-functions=100"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260719.1",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.7.0",
+    "pngjs": "^7.0.0",
     "typescript": "^7.0.2",
     "wrangler": "^4.114.0"
   },

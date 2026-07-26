@@ -1,0 +1,66 @@
+name: Bug report
+description: Something isn't working on the device, in the simulator, or in the proxy
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't paste your proxy token, Cloudflare credentials, or a full
+        Worker URL that contains a `key=` query parameter.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part?
+      options:
+        - radar-widget (on a device)
+        - radar-widget (in the simulator)
+        - speedtest-widget
+        - proxy (Cloudflare Worker)
+        - build / setup scripts
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device / SDK
+      description: e.g. "Edge 1040, firmware 22.10" or "simulator, Connect IQ 9.2.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        For a widget crash, `Garmin/Apps/LOGS/CIQ_LOG.YML` on the device has the
+        exception and stack trace -- that's usually the whole answer. For proxy
+        issues, the output of `curl https://<your-worker>/health` is useful (it
+        contains no secrets).
+      render: shell
+
+  - type: input
+    id: location
+    attributes:
+      label: Approximate location and zoom
+      description: Only if it looks location-specific. A rough area is fine.

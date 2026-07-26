@@ -1,13 +1,18 @@
 name: proxy
 
-# Build/test on every PR and push that touches the proxy; deploy to Cloudflare
-# Workers only on push to main. Widget-only changes don't trigger this.
+# Build/test the proxy on every PR; deploy to Cloudflare Workers only on push to
+# main.
+#
+# The path filter is on `push` but deliberately NOT on `pull_request`: it keeps
+# widget-only merges from redeploying an unchanged Worker, while still letting
+# `test` be a required status check. A path-filtered check never reports on a PR
+# that doesn't match, and a required check that never reports blocks the PR
+# forever.
 on:
   push:
     branches: [main]
     paths: ['proxy/**', '.github/workflows/proxy.yml']
   pull_request:
-    paths: ['proxy/**', '.github/workflows/proxy.yml']
   workflow_dispatch:
 
 permissions:
@@ -29,7 +34,14 @@ jobs:
           cache-dependency-path: proxy/package-lock.json
       - run: npm ci
       - run: npm run typecheck    # tsc --noEmit over the JS sources (checkJs)
-      - run: npm test
+      # Runs the suite with coverage thresholds attached (see package.json), so
+      # a change that adds an untested branch fails here rather than quietly
+      # eroding the numbers.
+      - run: npm run coverage
+      # Production dependencies only. The dev tree pulls wrangler -> miniflare ->
+      # sharp, which carries advisories that never reach the deployed Worker;
+      # gating on those would just train us to ignore this step.
+      - run: npm audit --omit=dev --audit-level=high
       # Validate the Worker bundles and wrangler.toml parses (incl. the
       # ratelimit binding). Local-only - needs no Cloudflare credentials.
       - run: npx wrangler deploy --dry-run --outdir dist
@@ -53,6 +65,7 @@ jobs:
           cache-dependency-path: proxy/package-lock.json
       - run: npm ci   # installs upng-js so wrangler can bundle it
       - uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4
+        id: deploy
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -68,3 +81,44 @@ jobs:
             PROXY_TOKEN
         env:
           PROXY_TOKEN: ${{ secrets.PROXY_TOKEN }}
+
+      # A successful `wrangler deploy` only means Cloudflare accepted the upload.
+      # /health is unauthenticated precisely so it can be probed here: `ok`
+      # proves the Worker boots and routes, and `rateLimiter` proves the
+      # RATE_LIMITER binding in wrangler.toml actually materialised at runtime --
+      # the one part of the config that silently no-ops when it's wrong.
+      - name: Smoke-test the deployment
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          if [[ -z "$DEPLOY_URL" ]]; then
+            echo "::error::wrangler-action reported no deployment URL; cannot verify the deploy"
+            exit 1
+          fi
+          echo "Probing $DEPLOY_URL/health"
+
+          body=''
+          for attempt in 1 2 3 4 5 6; do
+            if body=$(curl -fsS --max-time 10 "$DEPLOY_URL/health"); then
+              break
+            fi
+            echo "attempt $attempt failed; the new version may still be propagating"
+            body=''
+            sleep 5
+          done
+
+          if [[ -z "$body" ]]; then
+            echo "::error::/health never responded after the deploy"
+            exit 1
+          fi
+          echo "$body"
+
+          if [[ "$(jq -r '.ok' <<<"$body")" != "true" ]]; then
+            echo "::error::/health did not report ok=true"
+            exit 1
+          fi
+          if [[ "$(jq -r '.rateLimiter' <<<"$body")" != "true" ]]; then
+            echo "::error::RATE_LIMITER is not bound in the deployed Worker -- /frames and /tile are unprotected"
+            exit 1
+          fi
+          echo "Deployment verified: routing up, rate-limit binding live."
