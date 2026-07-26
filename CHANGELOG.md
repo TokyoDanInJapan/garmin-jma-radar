@@ -26,7 +26,6 @@ the proxy deploys continuously from `main` and is not separately versioned.
 - Release workflow: tagging `v*` builds both widget `.iq` packages and attaches
   them to a GitHub Release.
 - `CONTRIBUTING.md`, issue and PR templates, this changelog.
-- Demo GIF of the widget running, in the README.
 - `speedtest-widget/run-sim.sh`, matching the radar widget's.
 
 ### Fixed
@@ -45,8 +44,12 @@ the proxy deploys continuously from `main` and is not separately versioned.
   errors where `"$k[[:space:]]"` parsed as an array subscript.
 - `proxy/scripts/gen-samples.mjs` imported `pngjs` from a hardcoded
   `/tmp/imgtools` path, so it only ran on one machine. It now depends on `pngjs`
-  properly and emits a `/frames`-shaped `frames.json`, which makes the device GIF
-  reproducible from live JMA data without a deployed proxy or a token.
+  properly and emits a `/frames`-shaped `frames.json`, so the sample pipeline
+  runs from live JMA data without a deployed proxy or a token.
+- `gen-device-gif.py` claimed to mirror `RadarView.mc onUpdate()`. It does not:
+  it approximates an early prototype and has diverged from the real UI (title
+  row, romanized attribution, zoom buttons, progress bar). Docstring corrected
+  so its output isn't mistaken for a screenshot of the app.
 
 ### Changed
 

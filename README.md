@@ -3,17 +3,6 @@
 Animated, rider-centered rain radar for Garmin Edge devices, using JMA's
 high-resolution precipitation nowcast (高解像度降水ナウキャスト). **Japan only.**
 
-<p align="center">
-  <img src="docs/media/garmin-display.gif"
-       alt="Animated rain radar on a Garmin Edge screen: rider marker centred over Tokyo, six frames from -15 to +60 minutes"
-       width="322">
-</p>
-
-<p align="center">
-  <em>Six frames, -15 to +60 minutes, centred on the rider. Rendered from live JMA
-  data by <code>proxy/scripts/gen-samples.mjs</code> + <code>gen-device-gif.py</code>.</em>
-</p>
-
 The project has three parts:
 
 - **`proxy/`** - a Cloudflare Worker that reads JMA's radar times, fetches and
