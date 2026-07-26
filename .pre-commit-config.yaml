@@ -1,17 +1,33 @@
-# Local secret scanning before each commit. One-time setup:
+# Local checks before each commit. One-time setup:
 #
 #   pipx install pre-commit      # or: brew install pre-commit / pip install pre-commit
 #   pre-commit install           # installs the git hook into this clone
 #
-# Thereafter every `git commit` scans the staged changes with gitleaks and aborts
-# the commit if a secret is detected (using .gitleaks.toml). This is the earliest
-# catch -- it stops a secret before it ever enters a commit. CI runs the same scan
-# (.github/workflows/secret-scan.yml), so the check is enforced even for clones
-# that haven't run `pre-commit install`.
+# Thereafter every `git commit` scans the staged changes and aborts the commit on
+# a finding. This is the earliest catch -- for secrets in particular, it stops one
+# before it ever enters a commit. CI runs the same checks
+# (.github/workflows/secret-scan.yml and lint.yml), so they are enforced even for
+# clones that haven't run `pre-commit install`.
 #
-# Run on demand against the whole repo:  pre-commit run gitleaks --all-files
+# Run on demand against the whole repo:  pre-commit run --all-files
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:
       - id: gitleaks
+
+  # The build/deploy/setup scripts do the most error-prone work in the repo --
+  # sed rewriting of properties.xml, trap-based restore, PID liveness polling --
+  # and none of it is covered by a test.
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.11.0
+    hooks:
+      - id: shellcheck
+
+  # Keep in sync with ACTIONLINT_VERSION in .github/workflows/lint.yml.
+  # actionlint also shellchecks the inline `run:` blocks, which the hook above
+  # does not see.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
