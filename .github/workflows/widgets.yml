@@ -28,6 +28,11 @@ jobs:
     # Ubuntu dropped after 22.04 -- the same reason setup.sh provisions a 22.04
     # distrobox for local development. ubuntu-latest alone cannot run it.
     container: ubuntu:22.04
+    # Container jobs default to `sh -e {0}`, not bash, so `set -o pipefail` and
+    # `[[ ]]` in the steps below would fail to parse.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       # Runs before checkout on purpose: the bare image has no git, and without
