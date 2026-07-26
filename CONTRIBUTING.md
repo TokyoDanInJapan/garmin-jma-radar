@@ -98,10 +98,19 @@ Widgets are released by tag; the proxy deploys continuously from `main`.
 git tag -a v0.2.0 -m "..." && git push origin v0.2.0
 ```
 
-That builds both `.iq` packages and attaches them to a GitHub Release. Store
-uploads need the project's real developer key in the `GARMIN_DEVELOPER_KEY`
-secret (base64-encoded DER) -- without it the workflow still builds, but the
-packages are sideload-only.
+That attaches, per widget and per product in its manifest:
+
+- `<widget>-<device>.prg` -- sideloadable. Copy to `GARMIN/APPS` over USB. Works
+  with any signing key, so CI's ephemeral one is fine.
+- `<widget>.iq` -- the Store bundle. Only uploadable when signed with the key
+  that published the listing, so set `GARMIN_DEVELOPER_KEY` (base64-encoded DER)
+  to get one you can actually ship.
+- `<widget>-<device>.prg.debug.xml` -- symbol map for that build. A release
+  build strips debug info, so a `CIQ_LOG.YML` stack trace can't be decoded
+  without it, and it can't be regenerated after the fact.
+
+None of these have proxy credentials baked in -- CI has no `.env`, so users set
+the proxy URL and key in the widget's settings.
 
 ## Reporting bugs
 
