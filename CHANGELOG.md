@@ -23,8 +23,9 @@ the proxy deploys continuously from `main` and is not separately versioned.
 - Coverage thresholds on the proxy test suite (lines 98%, branches 90%,
   functions 100%), enforced in CI.
 - `npm audit --omit=dev` gate on production dependencies.
-- Release workflow: tagging `v*` builds both widget `.iq` packages and attaches
-  them to a GitHub Release.
+- Release workflow: tagging `v*` builds both widgets and attaches sideloadable
+  `.prg` files (one per product), the `.iq` Store bundles, and the matching
+  `.prg.debug.xml` symbol maps to a GitHub Release.
 - `CONTRIBUTING.md`, issue and PR templates, this changelog.
 - `speedtest-widget/run-sim.sh`, matching the radar widget's.
 

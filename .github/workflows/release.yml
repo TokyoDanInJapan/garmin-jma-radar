@@ -82,15 +82,37 @@ jobs:
             echo "::warning::GARMIN_DEVELOPER_KEY is not set; packages are sideload-only."
           fi
 
-      - name: Build store packages
+      # Two artifact kinds, because they serve different people:
+      #
+      #   <widget>-<device>.prg  sideload. Copy onto the Edge over USB
+      #                          (GARMIN/APPS) or load in the simulator. Works
+      #                          with any developer key, so CI's ephemeral one
+      #                          is fine.
+      #   <widget>.iq            Connect IQ Store bundle. Only useful when
+      #                          signed with the key that published the
+      #                          listing, and not sideloadable.
+      #
+      # Attaching only the .iq -- which is what this workflow did originally --
+      # produces a release nobody can use without the signing secret: wrong key
+      # for the Store, wrong format for sideloading.
+      - name: Build release packages
         env:
           KEY: ${{ steps.key.outputs.path }}
         run: |
           set -euo pipefail
           mkdir -p dist
           for widget in radar-widget speedtest-widget; do
+            devices=$(sed -nE 's/.*<iq:product id="([^"]+)".*/\1/p' "$widget/manifest.xml")
+            for device in $devices; do
+              echo "::group::$widget -> $device (.prg)"
+              (cd "$widget" && monkeyc -d "$device" -r -w -l 1 -f monkey.jungle \
+                 -o "../dist/$widget-$device.prg" -y "$KEY")
+              echo "::endgroup::"
+            done
+            echo "::group::$widget (.iq store bundle)"
             (cd "$widget" && monkeyc -e -r -w -l 1 -f monkey.jungle \
                -o "../dist/$widget.iq" -y "$KEY")
+            echo "::endgroup::"
           done
           ls -la dist
 
@@ -102,22 +124,51 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$STORE_READY" == "true" ]]; then
-            note='Signed with the project developer key -- uploadable to the Connect IQ Store.'
+            iq_note='Signed with the project developer key, so it can be uploaded to the Connect IQ Store.'
           else
-            note='**Sideload only.** Built with an ephemeral CI key because the GARMIN_DEVELOPER_KEY secret is not configured, so these cannot be uploaded to the Connect IQ Store as an update.'
+            iq_note='Built with an ephemeral CI key because the GARMIN_DEVELOPER_KEY secret is not set, so it **cannot** be uploaded to the Store as an update to an existing listing. The .prg files above are unaffected.'
           fi
           {
-            echo "Widget packages built from \`$TAG\`."
+            echo "Widget builds from \`$TAG\`."
             echo
-            echo "$note"
+            echo "### Install on a device"
+            echo
+            echo "Download the \`.prg\` for your Edge and copy it to \`GARMIN/APPS\`"
+            echo "over USB, then eject. Sideloaded builds are signed with a"
+            echo "throwaway key; that is fine for the device and does not affect"
+            echo "a Store install of the same app."
+            echo
+            echo "You still need to set the proxy URL and key in the widget's"
+            echo "settings -- these builds have no credentials baked in."
+            echo
+            echo "### Store bundle"
+            echo
+            echo "\`*.iq\` is the Connect IQ Store package, not a sideloadable file."
+            echo "$iq_note"
+            echo
+            echo "\`*.prg.debug.xml\` is the symbol map for the matching build."
+            echo "Attach it to a bug report if the app crashes -- a release build"
+            echo "strips debug info, so the stack trace in \`GARMIN/APPS/LOGS/CIQ_LOG.YML\`"
+            echo "cannot be decoded without it."
             echo
             echo "See [CHANGELOG.md](CHANGELOG.md) for what changed."
           } > /tmp/notes.md
 
+          # Explicit globs, not dist/*: the .prg build also drops a
+          # <name>-settings.json next to each binary, which is build scaffolding
+          # nobody downloads. The .prg.debug.xml is kept deliberately -- it is
+          # the symbol map for that exact build, and a release .prg (-r strips
+          # debug info) produces stack traces in CIQ_LOG.YML that cannot be
+          # decoded without it. It is not reproducible after the fact.
+          shopt -s nullglob
+          assets=(dist/*.prg dist/*.iq dist/*.prg.debug.xml)
+          printf 'Attaching %d assets:\n' "${#assets[@]}"
+          printf '  %s\n' "${assets[@]}"
+
           # Idempotent: re-running workflow_dispatch on the same tag replaces assets.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.iq --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" dist/*.iq \
+            gh release create "$TAG" "${assets[@]}" \
               --title "$TAG" --notes-file /tmp/notes.md
           fi
