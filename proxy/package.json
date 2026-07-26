@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=98 --test-coverage-branches=90 --test-coverage-functions=100"
+    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude=test/** --test-coverage-lines=98 --test-coverage-branches=90 --test-coverage-functions=100"
   },
   "engines": {
     "node": ">=22"
