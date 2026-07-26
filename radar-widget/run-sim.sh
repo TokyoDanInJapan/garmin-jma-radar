@@ -133,11 +133,13 @@ if [[ "$sim_was_running" -eq 0 ]]; then
     lon_semi="$(awk -v v="$lon" 'BEGIN{printf "%.0f", v*2147483648/180}')"
     set_ini_key() { # file key value
         local f="$1" k="$2" v="$3"
-        if [[ -f "$f" ]] && grep -qE "^[[:space:]]*$k[[:space:]]*=" "$f"; then
+        # ${k} rather than $k: "$k[" reads as an array subscript, both to bash's
+        # parser and to anyone skimming the regex.
+        if [[ -f "$f" ]] && grep -qE "^[[:space:]]*${k}[[:space:]]*=" "$f"; then
             if sed --version >/dev/null 2>&1; then
-                sed -i -E "s|^[[:space:]]*$k[[:space:]]*=.*|$k=$v|" "$f"
+                sed -i -E "s|^[[:space:]]*${k}[[:space:]]*=.*|$k=$v|" "$f"
             else
-                sed -i '' -E "s|^[[:space:]]*$k[[:space:]]*=.*|$k=$v|" "$f"
+                sed -i '' -E "s|^[[:space:]]*${k}[[:space:]]*=.*|$k=$v|" "$f"
             fi
         else
             printf '%s=%s\n' "$k" "$v" >> "$f"

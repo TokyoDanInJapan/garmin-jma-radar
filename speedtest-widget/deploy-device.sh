@@ -85,9 +85,11 @@ echo "Copied $prgname ($(du -h "$apps_dir/$prgname" | cut -f1)) -> $apps_dir"
 
 settings_dir="$apps_dir/SETTINGS"
 if [[ -d "$settings_dir" ]]; then
-    stale="$(find "$settings_dir" -maxdepth 1 -iname "${prgname%.*}.SET" 2>/dev/null || true)"
-    if [[ -n "$stale" ]]; then
-        rm -f $stale && sync && echo "Cleared stale device settings: $stale"
+    # Read into an array: the match is unquoted-glob-safe that way, and a device
+    # path with a space in it can't split into two bogus rm arguments.
+    mapfile -t stale < <(find "$settings_dir" -maxdepth 1 -iname "${prgname%.*}.SET" 2>/dev/null || true)
+    if [[ ${#stale[@]} -gt 0 ]]; then
+        rm -f "${stale[@]}" && sync && echo "Cleared stale device settings: ${stale[*]}"
     fi
 fi
 

@@ -228,13 +228,17 @@ if [[ -z "${CIQ_NO_SIM_UPDATE:-}" ]] && pgrep -x simulator >/dev/null 2>&1; then
 
             # Only wipe the sim's stored app settings when we actually baked in
             # .env secrets (so they win); otherwise keep what the user set in the
-            # running sim across rebuilds. The sim names the .SET after the app
-            # (uppercased AppName -> RAINRADAR.SET), NOT the .prg file -- so strip
-            # the "-<device>" suffix the single-device build adds to the output.
+            # running sim across rebuilds.
+            #
+            # The sim names the .SET after the uppercased .prg BASENAME, not the
+            # AppName: loading radar-test.prg yields RADAR-TEST.SET, and AppName
+            # here is "Rain Radar JP". This used to strip the "-<device>" suffix
+            # on the theory that the name came from AppName, so it looked for
+            # RAINRADAR.SET while the sim had written RAINRADAR-EDGE1040.SET --
+            # the file never matched and stale settings were never cleared.
             if [[ "$baked" -eq 1 ]]; then
                 tmpbase="${TMPDIR:-/tmp}"
                 setname="$(basename "$prg")"; setname="${setname%.*}"  # RainRadar-edge1030plus
-                setname="${setname%-$sim_device}"                      # RainRadar
                 setname="$(printf '%s' "$setname" | tr '[:lower:]' '[:upper:]').SET"
                 setpath="$tmpbase/com.garmin.connectiq/GARMIN/APPS/SETTINGS/$setname"
                 if [[ -f "$setpath" ]]; then

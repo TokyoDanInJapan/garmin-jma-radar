@@ -60,14 +60,18 @@ removed=0
 for f in "$apps_dir/$prgname" "$apps_dir/Media/$prgname"; do
     if [[ -f "$f" ]]; then rm -f "$f" && echo "Removed $(du -h "$f" 2>/dev/null | cut -f1 || echo)  $f" && removed=1; fi
 done
-# Settings file is named after the app; case can vary, hence nocaseglob. The
-# device may instead store it under an internal id we can't match -- harmless to
-# leave (it's ignored once the app is gone, cleared on reinstall).
-shopt -s nullglob nocaseglob
-for s in "$apps_dir"/SETTINGS/"${prgname%.*}".SET; do
+# Settings file is named after the app, but the case varies by device, hence
+# -iname. The device may instead store it under an internal id we can't match --
+# harmless to leave (it's ignored once the app is gone, cleared on reinstall).
+#
+# find, not a glob: the path we're matching contains no glob metacharacters, so
+# nullglob/nocaseglob had no effect on it and the loop ran once regardless. That
+# made `rm -f` on a nonexistent file "succeed", printing "Removed settings" and
+# suppressing the "Nothing to remove" message below.
+mapfile -t settings < <(find "$apps_dir/SETTINGS" -maxdepth 1 -iname "${prgname%.*}.SET" 2>/dev/null || true)
+for s in "${settings[@]}"; do
     rm -f "$s" && echo "Removed settings $s" && removed=1
 done
-shopt -u nullglob nocaseglob
 sync
 
 if [[ "$removed" -eq 0 ]]; then
