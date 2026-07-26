@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
-"""Render the JMA radar frames as they appear on a Garmin Edge screen, and
-assemble an animated GIF. Mirrors radar-widget/source/RadarView.mc onUpdate():
-black screen, 288px radar bitmap centred, frame index (top-left), data-age
-(top-right), disclaimer + JMA/GSI attribution (bottom). Edge 1040 = 282x470."""
+"""Assemble the sample radar frames into an animated GIF on a mock Edge screen.
+
+PROTOTYPE -- this is NOT what the widget renders. It approximates an early
+design and has since diverged from radar-widget/source/RadarView.mc
+drawRadarScreen(); do not use its output to show what the app looks like.
+Known differences:
+
+  - the real UI draws ONE centred title row, "1/6   20:00 now" (index, JST
+    label and the offset from analysis time); this draws the index top-left and
+    a "as of HH:MM" top-right, with no offset
+  - the real UI draws ONE romanized attribution line, "JMA Weather (processed)
+    · GSI Map", deliberately romanized because the device system font has no
+    CJK glyphs unless the device language is Japanese; this draws CJK
+    attribution plus a disclaimer line that the radar view does not have
+  - the real UI has Wide/Local zoom buttons along the bottom, and a segmented
+    progress bar pinned to the top edge while frames are still arriving
+
+For a faithful image, capture the simulator or a device instead. Edge 1040 =
+282x470."""
 import json, os
 from PIL import Image, ImageDraw, ImageFont
 
