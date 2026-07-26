@@ -67,13 +67,15 @@ fi
 
 # 3. In-box dependencies -----------------------------------------------------
 say "3/5  SDK & simulator libraries inside '$BOX'"
-deps="openjdk-17-jdk libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0-18 \
-libsoup2.4-1 libusb-1.0-0 libpng16-16 unzip"
-if distrobox enter "$BOX" -- bash -c "dpkg -s $deps >/dev/null 2>&1"; then
+# An array, so the package list reaches apt-get as separate arguments without
+# relying on word splitting.
+deps=(openjdk-17-jdk libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0-18
+      libsoup2.4-1 libusb-1.0-0 libpng16-16 unzip)
+if distrobox enter "$BOX" -- bash -c "dpkg -s ${deps[*]} >/dev/null 2>&1"; then
     ok "already installed"
 else
     distrobox enter "$BOX" -- sudo apt-get update
-    distrobox enter "$BOX" -- sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $deps
+    distrobox enter "$BOX" -- sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${deps[@]}"
     ok "installed"
 fi
 
@@ -108,18 +110,18 @@ fi
 
 # 5. Developer key -----------------------------------------------------------
 say "5/5  Developer signing key"
-if [ -f "$here/../developer_key.der" ] || [ -f "$here/../developer_key" ]; then
+if [ -f "$here/developer_key.der" ] || [ -f "$here/developer_key" ]; then
     ok "key already present at repo root"
 else
-    openssl genrsa -out "$here/../developer_key.pem" 4096
+    openssl genrsa -out "$here/developer_key.pem" 4096
     openssl pkcs8 -topk8 -inform PEM -outform DER \
-        -in "$here/../developer_key.pem" -out "$here/../developer_key.der" -nocrypt
-    rm -f "$here/../developer_key.pem"
+        -in "$here/developer_key.pem" -out "$here/developer_key.der" -nocrypt
+    rm -f "$here/developer_key.pem"
     ok "generated developer_key.der (git-ignored)"
 fi
 
 say "Setup complete."
-echo "Build & run from the host - build.sh / run-sim.sh auto-enter '$BOX':"
-echo "    cd $here"
-echo "    ./run-sim.sh        # build + launch the simulator"
-echo "    ./build.sh          # build the deployable bin/RainRadar.iq"
+echo "Both widgets share this toolchain. build.sh / run-sim.sh auto-enter '$BOX':"
+echo "    cd $here/radar-widget     && ./run-sim.sh   # build + launch the simulator"
+echo "    cd $here/speedtest-widget && ./run-sim.sh   # same, for the speed-test widget"
+echo "    ./build.sh                                  # deployable .iq, in either folder"
