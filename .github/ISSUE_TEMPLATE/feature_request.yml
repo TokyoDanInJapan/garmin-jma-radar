@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Worth a look at the Scope section of
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) first -- weather sources
+        outside Japan and anything requiring the proxy to store user data are
+        deliberately out of scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: The riding situation where the app falls short today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Anything that makes this tricky?
+      description: |
+        Optional. Device memory is the usual wall -- the widget can hold at most
+        six 288px frames before it OOMs mid-load.
