@@ -3,6 +3,17 @@
 Animated, rider-centered rain radar for Garmin Edge devices, using JMA's
 high-resolution precipitation nowcast (高解像度降水ナウキャスト). **Japan only.**
 
+<p align="center">
+  <img src="docs/media/garmin-display.gif"
+       alt="Animated rain radar on a Garmin Edge screen: rider marker centred over Tokyo, six frames from -15 to +60 minutes"
+       width="322">
+</p>
+
+<p align="center">
+  <em>Six frames, -15 to +60 minutes, centred on the rider. Rendered from live JMA
+  data by <code>proxy/scripts/gen-samples.mjs</code> + <code>gen-device-gif.py</code>.</em>
+</p>
+
 The project has three parts:
 
 - **`proxy/`** - a Cloudflare Worker that reads JMA's radar times, fetches and
@@ -18,6 +29,8 @@ The project has three parts:
 
 ```
 garmin-jma-radar/
+├── setup.sh               # one-time toolchain setup (distrobox container + SDK + key)
+├── docs/                  # SDK install, troubleshooting, demo media
 ├── proxy/                 # Cloudflare Worker (Node / wrangler)
 │   ├── src/
 │   │   ├── index.js       #   routes: /frames (list), /tile (PNG), /speedtest, /health
@@ -29,7 +42,6 @@ garmin-jma-radar/
 ├── radar-widget/          # Connect IQ widget (Monkey C)
 │   ├── manifest.xml       # app id, products, permissions
 │   ├── monkey.jungle      # build config
-│   ├── setup.sh           # one-time toolchain setup (distrobox container)
 │   ├── build.sh           # build the deployable .iq / .prg
 │   ├── run-sim.sh         # build + run in the simulator
 │   ├── deploy-device.sh   # dev build with .env baked in + copy to a USB device
@@ -39,8 +51,8 @@ garmin-jma-radar/
 │       ├── shared/        # strings, properties, settings (every device)
 │       ├── edge1030plus/  # per-device launcher icon (36x36)
 │       └── edge1040/      # per-device launcher icon (40x40)
-└── speedtest-widget/      # diagnostic widget (build/deploy/remove like the radar;
-                           #   reuses radar-widget/.env for the proxy URL + key)
+└── speedtest-widget/      # diagnostic widget (build/run-sim/deploy/remove like the
+                           #   radar; reuses radar-widget/.env for the URL + key)
 ```
 
 ## How it works
@@ -174,69 +186,14 @@ Alternatively, if the Worker runs on a custom domain, use a Cloudflare dashboard
 
 ### Install the Connect IQ SDK
 
-Pick **one** of these:
-
-**Option A - VS Code (simplest, all platforms).** Install the **Monkey C**
-extension (Garmin), then run *Connect IQ: Open SDK Manager* and download a recent
-SDK plus the device profiles you target (`edge1030plus`, `edge1040`). You can
-build and run entirely from VS Code (press **F5**).
-
-**Option B - Ubuntu 22.04 / 24.04 CLI.**
+On Ubuntu 24.10 or newer, from the repo root:
 
 ```bash
-# 1. Java (the monkeyc compiler runs on Java):
-sudo apt update && sudo apt install -y openjdk-17-jdk
-
-# 2. Simulator runtime libraries:
-sudo apt install -y libwebkit2gtk-4.1-0 libusb-1.0-0 libpng16-16   # 24.04
-# sudo apt install -y libwebkit2gtk-4.0-37 libusb-1.0-0 libpng16-16  # 22.04
-
-# 3. SDK Manager (GUI): download from
-#    https://developer.garmin.com/connect-iq/sdk/ , unzip, and run it.
-~/Downloads/connectiq-sdk-manager-linux/bin/sdkmanager
-#    Sign in, install the latest SDK, download the edge* device profiles.
-#    Everything installs under ~/.Garmin/ConnectIQ/.
+./setup.sh      # idempotent: container + SDK + simulator libs + signing key
 ```
 
-The `build.sh` / `run-sim.sh` scripts auto-discover the SDK from
-`~/.Garmin/ConnectIQ/current-sdk.cfg`, so no `PATH` setup is needed.
-
-**Option C - Ubuntu 24.10 / 25.x / 26.04 CLI (container).** Garmin still links
-the old `webkit2gtk-4.0` / `libsoup2.4` libraries that Ubuntu removed after 22.04,
-so a host install fails on newer releases. The toolchain runs in an Ubuntu 22.04
-[distrobox](https://distrobox.it/) container instead, which shares your home
-directory and display.
-
-First download the Linux SDK Manager from
-<https://developer.garmin.com/connect-iq/sdk/> and unzip it under `~/Downloads`,
-then run the bootstrap script:
-
-```bash
-cd radar-widget
-./setup.sh
-```
-
-`setup.sh` is idempotent and does the whole one-time setup: installs
-`podman`/`distrobox` on the host, creates the `garmin` container, installs the
-SDK/simulator libraries inside it, launches the SDK Manager for you to sign in
-and install the SDK, and generates a signing key if you don't have one. (Override
-the container name with `CIQ_BOX=<name> ./setup.sh`.)
-
-After that, run `build.sh` / `run-sim.sh` **from the host as usual** - they detect
-they're outside the box and automatically re-exec inside the `garmin` container
-(the simulator GUI still renders on your host display). Bypass the auto-enter with
-`CIQ_NO_BOX=1` if you ever need to.
-
-### Create a developer key (one-time)
-
-```bash
-openssl genrsa -out developer_key.pem 4096
-openssl pkcs8 -topk8 -inform PEM -outform DER \
-    -in developer_key.pem -out developer_key.der -nocrypt
-```
-
-Keep `developer_key.der` at the repo root (it's git-ignored). In VS Code, register
-it via *Connect IQ: Configure Monkey C*; the CLI scripts use it automatically.
+VS Code and plain-Ubuntu installs, plus how to create the developer signing key
+by hand, are in **[docs/connect-iq-sdk.md](docs/connect-iq-sdk.md)**.
 
 ### Run in the simulator
 
@@ -343,14 +300,19 @@ paired at run time, since the Edge has no cellular.
 
 ### Run the unit tests
 
-The pure helpers in `source/Util.mc` are covered by `(:test)` functions that
-compile only into a `--unit-test` build:
+The pure helpers in `source/Util.mc`, plus `FrameCache` and `FramePipeline`, are
+covered by `(:test)` functions that compile only into a `--unit-test` build:
 
 ```bash
 cd radar-widget
 monkeyc -d edge1040 -f monkey.jungle -o bin/test.prg -y ../developer_key.der --unit-test
 monkeydo bin/test.prg edge1040 -t    # prints PASS/FAIL per test
 ```
+
+CI runs these on every PR (`.github/workflows/widgets.yml`), headless under Xvfb:
+53 tests across the two widgets. Note that `monkeydo` exits non-zero even when
+every test passes, so the `PASSED`/`FAILED` summary line is the only reliable
+signal -- see `.github/scripts/run-ciq-tests.sh`.
 
 ### Secret scanning
 
@@ -368,20 +330,22 @@ pre-commit run --all-files   # optional: scan the whole repo now
 
 ### Troubleshooting
 
-| Symptom | Cause / fix |
-| --- | --- |
-| `Set Proxy URL in settings` | Proxy URL is empty - bake it via `.env`, or (Store installs) set it in Garmin Connect. |
-| `Request failed (404)` | Proxy URL is wrong / still the placeholder, or no Worker is deployed at that host. |
-| `Auth failed - check key` | Proxy key doesn't match the Worker's `PROXY_TOKEN` (and isn't a Cloudflare API token). |
-| `Acquiring GPS…` / `No GPS fix` | No fix yet - go outside (or set a sim position); tap Retry once it fails. |
-| Can't find the app on the device | It's a *widget* - open it from the widget loop (swipe down, then left/right), not the Connect IQ Apps menu. If absent entirely, it was built for the wrong product id or copied to the wrong folder. |
-| `IQ!` logo on the device | The app errored/crashed - read `Garmin/Apps/LOGS/CIQ_LOG.YML` on the device for the exception + stack trace. |
-| Proxy returns `401` | `PROXY_TOKEN` not set on the Worker - `wrangler secret put PROXY_TOKEN`. |
+Device, simulator, proxy and CI symptoms are collected in
+**[docs/troubleshooting.md](docs/troubleshooting.md)**.
 
-## 3. Continuous deployment (optional)
+## 3. Continuous integration & deployment
 
-`.github/workflows/proxy.yml` tests every PR/push under `proxy/**` and deploys to
-Cloudflare on push to `main`. (The Garmin widget isn't built in CI.)
+| Workflow | Runs on | What it does |
+| --- | --- | --- |
+| `proxy.yml` | every PR; `proxy/**` pushes to `main` | typecheck, tests with coverage thresholds, `npm audit` (prod deps), bundle dry-run. On `main`, deploys to Cloudflare and then smoke-tests `/health` -- asserting both that the Worker routes and that the `RATE_LIMITER` binding is actually live. |
+| `widgets.yml` | every PR and push | Installs the Connect IQ SDK headlessly, compiles both widgets for every product in their manifests with warnings treated as errors, and runs the 53 Monkey C unit tests in the simulator under Xvfb. |
+| `lint.yml` | every PR and push | shellcheck over every `*.sh`, actionlint over the workflows, ESLint over the proxy. |
+| `secret-scan.yml` | every PR and push | gitleaks across the full commit history. |
+| CodeQL | push + weekly | GitHub default setup. |
+
+Deploys are gated behind the `production` environment, whose branch policy only
+permits `main`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run each of
+these locally before pushing.
 
 **Required GitHub repo secrets** (Settings → Secrets and variables → Actions):
 

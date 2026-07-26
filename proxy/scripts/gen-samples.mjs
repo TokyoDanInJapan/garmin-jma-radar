@@ -20,9 +20,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { PNG } from "/tmp/imgtools/node_modules/pngjs/lib/png.js";
+import { PNG } from "pngjs";
 import { lonLatToTileXY } from "../src/tilemath.js";
-import { radarTileURL } from "../src/jma.js";
+import { radarTileURL, jstLabel } from "../src/jma.js";
 
 const TILE = 256;
 const OUT = 288; // matches DEVICE_TILE_SIZE in index.js
@@ -226,6 +226,17 @@ async function main() {
   }
 
   writeFileSync(join(samplesDir, "index.json"), JSON.stringify(index, null, 2));
+
+  // Mirror the /frames response shape so gen-device-gif.py can render these
+  // samples exactly as the device would, without needing a deployed proxy or a
+  // PROXY_TOKEN. Same JST labels the widget draws.
+  const framesJson = {
+    labels: frames.map((f) => jstLabel(f.validtime)),
+    validtimes: frames.map((f) => f.validtime),
+    count: frames.length,
+  };
+  writeFileSync(join(samplesDir, "frames.json"), JSON.stringify(framesJson, null, 2));
+
   console.log(`\nWrote ${frames.length} frames to ${samplesDir}`);
 }
 

@@ -27,7 +27,7 @@ def center(draw, y, text, font, fill=(255, 255, 255)):
 
 def render_screen(i):
     scr = Image.new("RGB", (SCREEN_W, SCREEN_H), (0, 0, 0))
-    radar = Image.open(os.path.join(SAMP, f"frame_{i:02d}.png")).convert("RGB")
+    radar = Image.open(os.path.join(SAMP, f"centered_frame{i:02d}.png")).convert("RGB")
     bx = (SCREEN_W - radar.width) // 2          # 288 slightly overflows 282 -> clipped, like the device
     by = (SCREEN_H - radar.height) // 2
     scr.paste(radar, (bx, by))
