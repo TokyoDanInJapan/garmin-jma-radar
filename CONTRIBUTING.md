@@ -76,6 +76,14 @@ git-ignored `.env` into `resources/shared/properties.xml` for the duration of a
 build and restores it afterwards. That restore is the single most dangerous thing
 in the repo; gitleaks runs pre-commit and in CI because of it.
 
+**Never publish them either.** gitleaks only sees what reaches git, and a baked
+key never does -- the restore removes it. But it *is* compiled into the `.prg`
+and into the generated `<name>-settings.json`, both of which CI uploads and
+releases publish. `.github/scripts/assert-no-credentials.sh` runs in both
+workflows and fails the build if the compiled `proxyKey` default is non-empty,
+or if a `.env` is present in the build tree at all. Keep that check ahead of any
+step that uploads an artifact.
+
 ## Typecheck levels
 
 Monkey C builds are gated at `-l 1`, which both widgets pass with zero warnings.

@@ -102,6 +102,11 @@ jobs:
           done
           exit $status
 
+      # These .prg files get uploaded as workflow artifacts below. Same check the
+      # release runs before publishing -- a credential must not reach either.
+      - name: Assert no proxy credential is baked in
+        run: .github/scripts/assert-no-credentials.sh radar-widget/bin speedtest-widget/bin
+
       # (:test) functions are compiled in only by --unit-test, so this is a
       # second build. It is not held to the zero-warning bar above: the test
       # sources trip "cannot determine container type" on their fixture literals.

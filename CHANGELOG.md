@@ -23,6 +23,12 @@ the proxy deploys continuously from `main` and is not separately versioned.
 - Coverage thresholds on the proxy test suite (lines 98%, branches 90%,
   functions 100%), enforced in CI.
 - `npm audit --omit=dev` gate on production dependencies.
+- Credential check on built widgets
+  (`.github/scripts/assert-no-credentials.sh`), run before any artifact upload
+  or release. A `PROXY_KEY` baked by `build.sh` is compiled into the `.prg` and
+  the generated `-settings.json`, but never reaches git because the build
+  restores `properties.xml` -- so gitleaks cannot catch it and the published
+  artifact is the one place it could escape.
 - Release workflow: tagging `v*` builds both widgets and attaches sideloadable
   `.prg` files (one per product), the `.iq` Store bundles, and the matching
   `.prg.debug.xml` symbol maps to a GitHub Release.
