@@ -16,8 +16,10 @@ The proxy deploys continuously from `main` and is not versioned separately.
   both widgets, passed the credential check and staged all ten assets, then
   failed at the last step. The job is now split. `build` keeps the container and
   hands the packages to `publish` as a workflow artifact, and `publish` runs on
-  the plain runner, where `gh` is on the PATH. Because no tag had been pushed
-  before v1.0.0, this step had never run.
+  the plain runner, where `gh` is on the PATH. `publish` takes only the
+  artifact and does no checkout, so it also sets `GH_REPO`. Without it, `gh`
+  asks git which repository it is in and stops with 'not a git repository'.
+  Because no tag had been pushed before v1.0.0, this step had never run.
 
 ## [1.0.0] - 2026-08-01
 
