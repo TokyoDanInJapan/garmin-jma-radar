@@ -8,6 +8,17 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ## Unreleased
 
+### Fixed
+
+- **The release workflow built every package and then published nothing.** The
+  job runs in a bare `ubuntu:22.04` container, which has no `gh`, so the final
+  `gh release create` stopped with 'command not found'. The v1.0.0 tag compiled
+  both widgets, passed the credential check and staged all ten assets, then
+  failed at the last step. The job is now split. `build` keeps the container and
+  hands the packages to `publish` as a workflow artifact, and `publish` runs on
+  the plain runner, where `gh` is on the PATH. Because no tag had been pushed
+  before v1.0.0, this step had never run.
+
 ## [1.0.0] - 2026-08-01
 
 ### Added
@@ -92,3 +103,5 @@ The proxy deploys continuously from `main` and is not versioned separately.
 - The path filter in `proxy.yml` now applies to `push` only, not to
   `pull_request`, so the `test` check reports on every PR. The check can then be
   required without deadlocking PRs that do not touch `proxy/**`.
+
+[1.0.0]: https://github.com/TokyoDanInJapan/garmin-jma-radar/releases/tag/v1.0.0
