@@ -8,6 +8,8 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ## Unreleased
 
+## [1.0.0] - 2026-08-01
+
 ### Added
 
 - CI for the Connect IQ widgets (`.github/workflows/widgets.yml`): headless SDK
