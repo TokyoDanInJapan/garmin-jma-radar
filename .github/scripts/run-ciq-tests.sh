@@ -29,7 +29,7 @@ if [[ ! -f "$prg" ]]; then
     exit 1
 fi
 
-# The simulator writes here; without it, it emits noisy warnings.
+# The simulator writes here. Without it, it emits noisy warnings.
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/xdg-runtime}"
 mkdir -p "$XDG_RUNTIME_DIR"
 
@@ -72,17 +72,17 @@ if [[ "$port_up" -eq 0 ]]; then
     cat "$sim_log" >&2
     exit 1
 fi
-sleep 2   # the port can flap briefly right after first appearing; let it settle
+sleep 2   # the port can flap right after first appearing, so let it settle
 
 echo "==> Running tests: $(basename "$prg") on $device"
-# Ignore the exit code on purpose (see header); the summary line is the signal.
+# Ignore the exit code on purpose (see header). The summary line is the signal.
 monkeydo "$prg" "$device" -t >"$result" 2>&1 || true
 cat "$result"
 
 summary="$(grep -E '^(PASSED|FAILED)' "$result" | tail -1 || true)"
 if [[ -z "$summary" ]]; then
     echo >&2
-    echo "No PASSED/FAILED summary from monkeydo -- it never got the program" >&2
+    echo "No PASSED/FAILED summary from monkeydo. It never got the program" >&2
     echo "running. Simulator log:" >&2
     cat "$sim_log" >&2
     exit 1

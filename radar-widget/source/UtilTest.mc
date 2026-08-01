@@ -3,7 +3,7 @@ using Toybox.Lang;
 
 // Unit tests for the pure helpers in Util. Functions annotated (:test) are only
 // compiled into a unit-test build (monkeyc --unit-test ...) and run in the
-// simulator via `monkeydo <prg> -t`; they are excluded from release builds, so
+// simulator via `monkeydo <prg> -t`. They are excluded from release builds, so
 // they add no on-device size. Each takes a Test.Logger and returns true on pass.
 //
 // Run locally:
@@ -30,7 +30,7 @@ function testClampNumBoundsInclusive(logger) {
 
 (:test)
 function testClampNumNullSnapsToLow(logger) {
-    // A missing setting reads as null; it must snap to the low bound.
+    // A missing setting reads as null. It must snap to the low bound.
     return Util.clampNum(null, 1, 6) == 1;
 }
 
@@ -129,7 +129,7 @@ function testQueryToParamsSkipsMalformed(logger) {
 
 (:test)
 function testQueryToParamsValueKeepsEquals(logger) {
-    // Only the first "=" splits; any "=" in the value is preserved.
+    // Only the first "=" splits. Any "=" in the value is preserved.
     var p = Util.queryToParams("k=a=b");
     return p.get("k").equals("a=b");
 }
@@ -178,8 +178,8 @@ function testHttpErrorMsgTransport(logger) {
 
 (:test)
 function testHttpErrorMsgAuthAndRateLimit(logger) {
-    return Util.httpErrorMsg(401).equals("Auth failed - check key")
-        && Util.httpErrorMsg(429).equals("Server busy - try later");
+    return Util.httpErrorMsg(401).equals("Auth failed: check key")
+        && Util.httpErrorMsg(429).equals("Server busy: try later");
 }
 
 (:test)
@@ -189,6 +189,6 @@ function testHttpErrorMsgServerErrorIncludesCode(logger) {
 
 (:test)
 function testHttpErrorMsgFallbackIncludesCode(logger) {
-    // An unclassified positive status (e.g. 418) falls through to the generic.
+    // An unclassified positive status (for example, 418) falls through to the generic.
     return Util.httpErrorMsg(418).equals("Request failed (418)");
 }

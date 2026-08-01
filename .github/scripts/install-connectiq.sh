@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Install the Connect IQ toolchain for CI: the SDK, the device profiles the
-# widgets target, and a throwaway signing key. Not used by local development --
+# widgets target, and a throwaway signing key. Not used by local development –
 # setup.sh provisions that via the SDK Manager GUI.
 #
 # Why this exists instead of a marketplace action:
@@ -9,9 +9,9 @@
 #   Garmin publishes the SDK on a public endpoint (sdks.json, below), but NOT
 #   the per-device profiles. The GUI SDK Manager pulls those from an
 #   authenticated, non-public service (monkeynet.garmin.com), so CI has no way
-#   to fetch them from Garmin at all -- and monkeyc cannot build without them,
+#   to fetch them from Garmin at all – and monkeyc cannot build without them,
 #   since every build needs -d <device>. CI therefore has to get device bits
-#   from somewhere else; see CIQ_DEVICES_URL.
+#   from somewhere else. See CIQ_DEVICES_URL.
 #
 # Usage:
 #   install-connectiq.sh <device> [<device> ...]
@@ -51,7 +51,7 @@ devices=("$@")
 say() { printf '\n==> %s\n' "$*"; }
 
 # --- SDK --------------------------------------------------------------------
-# sdks.json maps a version to its per-platform filenames; resolve ours rather
+# sdks.json maps a version to its per-platform filenames. Resolve ours rather
 # than hardcoding the dated, hash-suffixed zip name.
 say "Resolving Connect IQ SDK $SDK_VERSION"
 sdk_file="$(curl -fsSL --retry 3 "$SDK_BASE/sdks.json" \
@@ -88,7 +88,7 @@ else
     say "Fetching device profiles: ${missing[*]}"
     mkdir -p "$CIQ_HOME/Devices"
     curl -fsSL --retry 3 -o /tmp/devices.zip "$DEVICES_URL"
-    # Extract only what we build for; the archive carries every device Garmin
+    # Extract only what we build for. The archive carries every device Garmin
     # has ever shipped and we need two of them.
     patterns=()
     for d in "${missing[@]}"; do patterns+=("$d/*"); done
@@ -116,9 +116,9 @@ fi
 
 # --- Sanity: will the compiler look where we installed? ---------------------
 # monkeyc is a Java program and resolves its SDK/device root from the passwd
-# entry for the current uid, not from $HOME. When those disagree -- which they
+# entry for the current uid, not from $HOME. When those disagree – which they
 # do by default in a GitHub container job, where HOME=/github/home while uid 0's
-# passwd home is /root -- every build fails with "Invalid device id: <device>",
+# passwd home is /root – every build fails with "Invalid device id: <device>",
 # which says nothing about paths. Catch it here instead.
 passwd_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
 if [[ -n "$passwd_home" && "$passwd_home" != "$HOME" ]]; then

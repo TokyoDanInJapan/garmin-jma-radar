@@ -2,7 +2,7 @@
 #
 # Build the Proxy Speed Test widget (diagnostic companion to the radar).
 #
-# By default produces the store package bin/SpeedTest.iq; with -d <device> a
+# By default produces the store package bin/SpeedTest.iq. With -d <device> a
 # single-device .prg for sideloading/the simulator. If a simulator is open the
 # fresh build is loaded into it (skip with CIQ_NO_SIM_UPDATE=1).
 #
@@ -16,7 +16,7 @@
 #   ./build.sh -o /tmp/SpeedTest.iq  # custom output path
 #   ./build.sh -k ~/keys/dev.der     # custom developer key
 #   ./build.sh -e ../radar-widget/.env     # secrets file (this is the default)
-#   ./build.sh --debug               # debug build (.iq only; .prg is already debug)
+#   ./build.sh --debug               # debug build (.iq only, as .prg already is)
 #
 set -euo pipefail
 
@@ -43,8 +43,11 @@ envfile="$here/../radar-widget/.env"          # reuse the radar's secrets by def
 release=1
 baked=0
 
+# Print the header comment block as help. Derived from the file rather than a
+# fixed line range, which silently truncated the examples whenever the header
+# grew: drop the shebang, stop at the first non-comment line, strip the '# '.
 usage() {
-    sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "${BASH_SOURCE[0]}"
     exit "${1:-0}"
 }
 
@@ -170,8 +173,8 @@ if [[ -z "${CIQ_NO_SIM_UPDATE:-}" ]] && pgrep -x simulator >/dev/null 2>&1; then
                 echo "Sim:    compiling $sim_device .prg for the running simulator..."
                 build_prg "$sim_device" "$prg"
             fi
-            # The sim names the .SET after the uppercased .prg basename, not the
-            # AppName -- see the longer note in radar-widget/build.sh. Stripping
+            # The simulator names the .SET after the uppercased .prg basename, not the
+            # AppName – see the longer note in radar-widget/build.sh. Stripping
             # the "-<device>" suffix here meant the file was never found and
             # stale settings were never actually cleared.
             if [[ "$baked" -eq 1 ]]; then

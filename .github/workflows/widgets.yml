@@ -1,7 +1,7 @@
 name: widgets
 
 # Build and unit-test both Connect IQ widgets. Until this existed, roughly half
-# the codebase -- ~2,000 lines of Monkey C, including 48 unit tests -- was only
+# the codebase – ~2,000 lines of Monkey C, including 48 unit tests – was only
 # ever checked by hand on a developer machine.
 #
 # Deliberately NOT path-filtered on pull_request: a required status check that
@@ -25,7 +25,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     # The simulator links libwebkit2gtk-4.0 / libjavascriptcoregtk-4.0, which
-    # Ubuntu dropped after 22.04 -- the same reason setup.sh provisions a 22.04
+    # Ubuntu dropped after 22.04 – the same reason setup.sh provisions a 22.04
     # distrobox for local development. ubuntu-latest alone cannot run it.
     container: ubuntu:22.04
     # Container jobs default to `sh -e {0}`, not bash, so `set -o pipefail` and
@@ -35,8 +35,8 @@ jobs:
         shell: bash
     env:
       # GitHub sets HOME=/github/home in container jobs, but monkeyc is a Java
-      # program and resolves its SDK/device root from the passwd entry for uid 0
-      # -- i.e. /root. Left alone, the toolchain installs to /github/home and the
+      # program and resolves its SDK/device root from the passwd entry for uid 0,
+      # that is, /root. Left alone, the toolchain installs to /github/home and the
       # compiler looks in /root, which surfaces as "Invalid device id" rather
       # than anything about paths. Pin both to the same place.
       HOME: /root
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # 310 MB of SDK plus the device profiles. Caching turns a ~310 MB download
-      # into a cache restore; the key covers the installer script, so bumping the
+      # into a cache restore. The key covers the installer script, so bumping the
       # SDK version or the pinned device archive invalidates it.
       - name: Cache Connect IQ SDK and device profiles
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -76,7 +76,7 @@ jobs:
       # Every <iq:product> in each manifest, at typecheck level 1 with warnings
       # treated as errors. Both widgets are clean at -w today, so any new warning
       # is a regression. Levels 2 and 3 currently surface ~360 "untyped member"
-      # findings across the two widgets -- worth doing, but it is an annotation
+      # findings across the two widgets – worth doing, but it is an annotation
       # project, not a gate we can turn on now (see CONTRIBUTING.md).
       - name: Compile widgets (all products, warnings are errors)
         run: |
@@ -103,7 +103,7 @@ jobs:
           exit $status
 
       # These .prg files get uploaded as workflow artifacts below. Same check the
-      # release runs before publishing -- a credential must not reach either.
+      # release runs before publishing – a credential must not reach either.
       - name: Assert no proxy credential is baked in
         run: .github/scripts/assert-no-credentials.sh radar-widget/bin speedtest-widget/bin
 

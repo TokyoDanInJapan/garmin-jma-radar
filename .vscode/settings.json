@@ -11,19 +11,19 @@
   },
 
   // Live analysis (parser + type-checker issues shown in the Problems tab as you
-  // type). These have no auto-fix - read them there and edit by hand. Surface the
-  // same checks the build uses; raise to "Strict" for more.
+  // type). These have no auto-fix – read them there and edit by hand. Surface the
+  // same checks the build uses. Raise to "Strict" for more.
   "prettierMonkeyC.typeCheckLevel": "Default",
   "prettierMonkeyC.checkTypes": "WARNING",
   "prettierMonkeyC.checkInvalidSymbols": "WARNING",
 
   // The Connect IQ app lives in the radar-widget/ subfolder, not the workspace root,
-  // so point the Monkey C tooling (Garmin build/F5 AND the Prettier optimizer)
+  // so point the Monkey C tooling (Garmin build/F5 AND the Prettier optimiser)
   // at the jungle there. Paths are relative to the workspace root.
   "monkeyC.jungleFiles": "radar-widget/monkey.jungle",
-  // Keep the optimizer's generated copy under radar-widget/bin (already git-ignored).
+  // Keep the optimiser's generated copy under radar-widget/bin (already git-ignored).
   "prettierMonkeyC.outputPath": "radar-widget/bin/optimized",
   // Developer signing key at the repo root (git-ignored). Needed for the build
-  // step that follows the optimize step (and for in-IDE F5 builds).
+  // step that follows the optimise step (and for in-IDE F5 builds).
   "monkeyC.developerKeyPath": "${workspaceFolder}/developer_key"
 }

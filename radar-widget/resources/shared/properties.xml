@@ -1,20 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Persistent app properties (defaults). Editable from the Garmin Connect /
-  Connect IQ app via settings.xml, read at runtime via Application.Properties.
+  Persistent app properties (defaults). The user edits them from Garmin Connect
+  or the Connect IQ app through settings.xml. The app reads them at run time
+  through Application.Properties.
 -->
 <properties>
     <!-- Your deployed Cloudflare Worker base URL (no trailing slash). -->
     <property id="proxyBase" type="string">https://jma-rain-radar-proxy.YOURNAME.workers.dev</property>
-    <!-- Shared secret matching the proxy's PROXY_TOKEN. Sent as ?key=. -->
+    <!-- Shared secret that matches the proxy's PROXY_TOKEN. Sent as ?key=. -->
     <property id="proxyKey" type="string"></property>
-    <!-- Tile zoom: 4 (widest) .. 11 (street). 12+ has no JMA/GSI tiles.
-         Default 8 = Local. The on-screen buttons pick 6 (Wide) or 8 (Local). -->
+    <!-- Tile zoom: 4 (widest) to 11 (street). There are no JMA or GSI tiles
+         past 11. Default 8, which is Local. The on-screen buttons pick 6 (Wide)
+         or 8 (Local). -->
     <property id="zoom" type="number">8</property>
-    <!-- Animation frames to request, 1..6 (6 = max; a 7th OOMs the device).
-         This is the Wi-Fi maximum: on Wi-Fi all of them load fast. Over Bluetooth
-         the app throttles to 3 (BLE_FRAME_CAP) on its own, since image pulls are
-         very slow there (~27s each via Garmin's image service). The proxy keeps
+    <!-- Animation frames to request, 1 to 6. Six is the maximum, because a
+         seventh frame makes the device run out of memory. Six is also the Wi-Fi
+         maximum: on Wi-Fi every frame loads fast. Over Bluetooth the app
+         throttles itself to 3 (BLE_FRAME_CAP), because image pulls are very slow
+         there (about 27 s each through Garmin's image service). The proxy keeps
          the highest-priority frames: now, then +60, +30, +45, +15, -15. -->
     <property id="frameCount" type="number">6</property>
 </properties>

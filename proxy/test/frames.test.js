@@ -41,7 +41,7 @@ test("a 0/invalid count falls back to the full set", async () => {
 });
 
 test("offsets JMA doesn't currently have are silently skipped", async () => {
-  // Drop the +45 forecast frame; a count of 4 (priority now,+60,+30,+45) then
+  // Drop the +45 forecast frame. A count of 4 (priority now,+60,+30,+45) then
   // yields only the three that exist.
   stubFetch(OBSERVED, FORECAST.filter((f) => f.validtime !== "20260627124500"));
   const frames = await getFrameTimes({}, CTX, 4);

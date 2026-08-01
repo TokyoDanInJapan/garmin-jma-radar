@@ -3,16 +3,16 @@
 # Dev deploy: build the Proxy Speed Test widget with the proxy secrets baked in
 # (from ../radar-widget/.env, the same the radar uses), then copy it onto the connected
 # Edge. Sideloaded apps can't be configured via Garmin Connect, so the Proxy
-# URL/key are baked into the .prg -- don't share this build.
+# URL/key are baked into the .prg – don't share this build.
 #
-# Runs on the host (needs the USB-mounted device + udisksctl); build.sh enters
-# the Connect IQ container on its own.
+# Runs on the host (needs the USB-mounted device + udisksctl). The build step
+# delegates to build.sh, which enters the Connect IQ container on its own.
 #
 # Usage:
 #   ./deploy-device.sh                  # build edge1030plus, copy to the device
 #   ./deploy-device.sh -d edge1040      # a different device id
 #   ./deploy-device.sh --dest <dir>     # explicit GARMIN/.../Apps folder
-#   ./deploy-device.sh --no-eject       # leave the device mounted afterward
+#   ./deploy-device.sh --no-eject       # leave the device mounted afterwards
 #   ./deploy-device.sh -h
 #
 set -euo pipefail
@@ -26,7 +26,10 @@ envfile="$here/../radar-widget/.env"          # reuse the radar's secrets
 key="$here/../developer_key.der"; [ -f "$key" ] || key="$here/../developer_key"
 prgname="SpeedTest.PRG"
 
-usage() { sed -n '3,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# Print the header comment block as help. Derived from the file rather than a
+# fixed line range, which silently truncated the examples whenever the header
+# grew: drop the shebang, stop at the first non-comment line, strip the '# '.
+usage() { sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "${BASH_SOURCE[0]}"; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -41,7 +44,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -f "$envfile" ]]; then
-    echo "No $envfile -- this script bakes the Proxy URL/key into the build." >&2
+    echo "No $envfile. This script bakes the Proxy URL/key into the build." >&2
     echo "Create radar-widget/.env (see radar-widget/.env.example), or pass -e <file>." >&2
     exit 1
 fi
@@ -98,7 +101,7 @@ if [[ "$eject" -eq 1 ]]; then
     devnode="$(findmnt -no SOURCE --target "$apps_dir" 2>/dev/null || true)"
     if [[ -n "$devnode" ]] && command -v udisksctl >/dev/null 2>&1; then
         if udisksctl unmount -b "$devnode" >/dev/null 2>&1; then
-            echo "Ejected $devnode -- safe to unplug."
+            echo "Ejected $devnode. Safe to unplug."
         else
             echo "Copied OK, but auto-eject failed; eject it manually before unplugging."
         fi

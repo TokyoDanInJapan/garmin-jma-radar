@@ -1,7 +1,7 @@
 using Toybox.Lang;
 
 // Storage key under which the list of persisted tile URLs is kept, so retain()
-// can evict stale persisted frames -- Application.Storage offers no way to
+// can evict stale persisted frames – Application.Storage offers no way to
 // enumerate keys. Deliberately unlike any tile URL (those start with "/tile" or
 // "http"), so it can't collide with a frame entry.
 const FRAME_CACHE_INDEX_KEY = "__frameCacheIndex__";
@@ -10,22 +10,22 @@ const FRAME_CACHE_INDEX_KEY = "__frameCacheIndex__";
 // a live in-memory map and an optional persistent backing (FrameStore).
 //
 // The URL encodes zoom, rounded lat/lon, basetime and validtime, so an identical
-// URL is a byte-identical frame -- which lets a reopened widget reuse a frame it
+// URL is a byte-identical frame – which lets a reopened widget reuse a frame it
 // already downloaded instead of pulling it again over the slow BLE image path
-// (~30x slower than the data path; see FramePipeline).
+// (~30x slower than the data path, see FramePipeline).
 //
 // The two tiers cover two different "reopen" cases:
-//   - In-memory (mMap): reuse within one app instance -- a reload, a zoom
+//   - In-memory (mMap): reuse within one app instance – a reload, a zoom
 //     re-fetch, the detail-view push. Free: the bitmaps are the same objects the
 //     pipeline already holds resident, so this adds no memory beyond live frames.
 //   - Persistent (mStore, optional): reuse across a COLD START. Scrolling to
 //     another widget in the carousel stops the app (frees mMap), so returning is
-//     a cold start; only Application.Storage spans that. It can hold decoded
+//     a cold start. Only Application.Storage spans that. It can hold decoded
 //     bitmaps directly (see FrameStore), so no PNG-byte round-trip is needed.
-//     Writes are best-effort -- a full store just means that frame re-downloads.
+//     Writes are best-effort – a full store just means that frame re-downloads.
 //
 // Bounded by retain(): each new frame list drops entries (both tiers) whose URL
-// is no longer in the list -- frames aged out of the -15..+60 window, or from a
+// is no longer in the list – frames aged out of the -15..+60 window, or from a
 // since-changed zoom/location. The cache therefore never holds more than the
 // current frame count.
 class FrameCache {
@@ -37,7 +37,7 @@ class FrameCache {
         mStore = store;
     }
 
-    // In-memory hit first; on a miss fall back to the persistent store (the
+    // In-memory hit first. On a miss fall back to the persistent store (the
     // cold-start path) and re-warm the in-memory tier so later gets are free.
     function get(url as Lang.String) {
         var v = mMap.get(url);
@@ -51,7 +51,7 @@ class FrameCache {
 
     // Store in memory and, best-effort, persist so the frame survives a cold
     // start. If the store rejects it (full), drop the partial entry and stop
-    // tracking the URL -- the in-memory copy still serves this session.
+    // tracking the URL – the in-memory copy still serves this session.
     function put(url as Lang.String, bmp) as Void {
         mMap.put(url, bmp);
         if (mStore != null) {
@@ -64,7 +64,7 @@ class FrameCache {
         }
     }
 
-    // Keep only entries whose URL appears in `urls`; drop the rest from BOTH
+    // Keep only entries whose URL appears in `urls`. Drop the rest from BOTH
     // tiers (they've aged out of the useful window). Returns how many in-memory
     // entries were dropped.
     function retain(urls as Lang.Array<Lang.String>) as Lang.Number {

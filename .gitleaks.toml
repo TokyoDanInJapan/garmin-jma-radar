@@ -4,15 +4,16 @@
 # repo root.
 #
 # Why a custom config: the only bespoke secret here is the proxy's shared token
-# (PROXY_TOKEN on the Worker; the same value is the widget's proxyKey / PROXY_KEY,
-# sent as ?key=). It's a bare random hex string with no provider signature, so the
-# stock rules can miss it. The rules below pin the exact places it could leak:
+# (PROXY_TOKEN on the Worker, and the same value is the widget's proxyKey and
+# PROXY_KEY, sent as ?key=). It's a bare random hex string with no provider
+# signature, so the stock rules can miss it. The rules below pin the exact
+# places it could leak:
 #   - build.sh bakes it into radar-widget/resources/shared/properties.xml during a build
-#     (id="proxyKey" ...>VALUE<) and restores the file afterward -- a mistimed
-#     `git add` is the realistic accident this guards against;
-#   - .env / .dev.vars style assignments (PROXY_TOKEN=..., PROXY_KEY=...);
+#     (id="proxyKey" ...>VALUE<) and restores the file afterwards – a mistimed
+#     `git add` is the realistic accident this guards against,
+#   - .env / .dev.vars style assignments (PROXY_TOKEN=..., PROXY_KEY=...),
 #   - a token pasted into a URL (...?key=...).
-# Cloudflare API tokens etc. are covered by the bundled default ruleset.
+# The bundled default ruleset covers Cloudflare API tokens and the rest.
 
 title = "garmin-jma-radar secret scan"
 

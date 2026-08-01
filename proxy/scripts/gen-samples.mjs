@@ -2,16 +2,16 @@
  * Generate sample images via the JMA API that the proxy wraps.
  *
  * For a rider location it pulls the most recent observed nowcast frames and, per
- * frame, fetches the full 3x3 tile neighbourhood and stitches a rider-centered
+ * frame, fetches the full 3x3 tile neighbourhood and stitches a rider-centred
  * composite. It's a standalone reference (separate pngjs implementation) for what
  * the Worker renders: production composite.js composites the same layers but emits
- * only the cropped device window - and the Worker fetches just the tiles that
+ * only the cropped device window – and the Worker fetches just the tiles that
  * window overlaps, not the whole 3x3 - whereas this script also saves the full
  * 768x768 stitch for visual inspection.
  *
  * Output (../../samples relative to this file):
  *   tiles/frameNN_dx_dy.png   raw JMA tiles (the proxy's inputs)
- *   composite_frameNN.png     768x768 stitched 3x3 with a centered no-rain bg
+ *   composite_frameNN.png     768x768 stitched 3x3 with a centred no-rain bg
  *   centered_frameNN.png      288x288 rider-centered crop (the device payload)
  *   index.json                metadata for the run
  *
@@ -29,21 +29,21 @@ const OUT = 288; // matches DEVICE_TILE_SIZE in index.js
 const BG = [235, 235, 235, 255]; // light fallback bg where a base tile is missing/off-grid
 const BASE_STYLE = "english"; // GSI english labels - what JMA's en_nowc viewer uses
 const BASE_DESATURATE = true; // JMA's viewer renders the base grayscale so the radar pops
-const RADAR_OPACITY = 0.85; // JMA radar pixels are fully opaque; dim slightly, matching the viewer
+const RADAR_OPACITY = 0.85; // JMA radar pixels are fully opaque, so dim them to match the viewer
 const here = dirname(fileURLToPath(import.meta.url));
 const samplesDir = join(here, "..", "..", "samples");
 
 const N1_URL =
   "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json";
-// Base map = GSI (地理院タイル) tiles, fetched from JMA's own mirror - the exact
+// Base map = GSI (地理院タイル) tiles, fetched from JMA's own mirror – the exact
 // source the JMA nowcast viewer uses (its "slmcs" layer). Same z/x/y scheme as
 // the radar. Content is GSI's, so its attribution (出典: 国土地理院) is required
 // alongside JMA's even though we fetch from jma.go.jp.
 const gsiTileURL = (z, x, y) =>
   `https://www.jma.go.jp/tile/gsi/${BASE_STYLE}/${z}/${x}/${y}.png`;
 
-// Desaturate + lighten a base tile toward the washed grayscale the JMA viewer
-// applies client-side, so the colored radar stands out on top.
+// Desaturate + lighten a base tile towards the washed greyscale the JMA viewer
+// applies client-side, so the coloured radar stands out on top.
 function desaturate(png) {
   for (let i = 0; i < png.data.length; i += 4) {
     const g = 0.3 * png.data[i] + 0.59 * png.data[i + 1] + 0.11 * png.data[i + 2];
@@ -66,7 +66,7 @@ async function fetchPNG(url) {
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`${r.status} ${url}`);
   const buf = Buffer.from(await r.arrayBuffer());
-  return PNG.sync.read(buf); // normalizes palette/RGBA -> RGBA
+  return PNG.sync.read(buf); // normalises palette/RGBA -> RGBA
 }
 
 // Find the rainiest z=8 tile near a starting area for the newest frame, so the
@@ -177,8 +177,8 @@ async function main() {
   const { x, y, px, py } = lonLatToTileXY(lon, lat, z);
   const index = { generated: newest.validtime, rider: { lat, lon, z }, baseMap: `GSI ${BASE_STYLE}${BASE_DESATURATE ? " (desaturated)" : ""}`, radarOpacity: RADAR_OPACITY, centerTile: { x, y, px, py }, frames: [] };
 
-  // Base map is identical across frames - fetch the 3x3 neighbourhood once.
-  // Save the raw GSI tile (the proxy's input); composite with the desaturated copy.
+  // Base map is identical across frames – fetch the 3x3 neighbourhood once.
+  // Save the raw GSI tile (the proxy's input). Composite with the desaturated copy.
   const base = {};
   for (const dx of [-1, 0, 1]) {
     for (const dy of [-1, 0, 1]) {
