@@ -3,18 +3,18 @@
 # Dev deploy: build the JMA Rain Radar widget for a physical Edge with your
 # radar-widget/.env secrets (Proxy URL + key) baked in, then copy it onto the
 # connected device. This is the reliable way to run on real hardware, because a
-# SIDELOADED app can't be configured through Garmin Connect -- only apps
+# SIDELOADED app can't be configured through Garmin Connect – only apps
 # installed from the Connect IQ Store can. The baked secrets live in the .prg on
 # YOUR device, so don't share or publish this build.
 #
-# Runs on the host (it needs the USB-mounted device + udisksctl); the build step
+# Runs on the host (it needs the USB-mounted device + udisksctl). The build step
 # delegates to build.sh, which enters the Connect IQ container on its own.
 #
 # Usage:
 #   ./deploy-device.sh                  # build edge1030plus, copy to the device
 #   ./deploy-device.sh -d edge1040      # a different device id
 #   ./deploy-device.sh --dest <dir>     # explicit GARMIN/.../Apps folder
-#   ./deploy-device.sh --no-eject       # leave the device mounted afterward
+#   ./deploy-device.sh --no-eject       # leave the device mounted afterwards
 #   ./deploy-device.sh -h
 #
 set -euo pipefail
@@ -29,7 +29,10 @@ envfile="$here/.env"
 key="$here/../developer_key.der"; [ -f "$key" ] || key="$here/../developer_key"
 prgname="RainRadar.PRG"
 
-usage() { sed -n '3,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# Print the header comment block as help. Derived from the file rather than a
+# fixed line range, which silently truncated the examples whenever the header
+# grew: drop the shebang, stop at the first non-comment line, strip the '# '.
+usage() { sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "${BASH_SOURCE[0]}"; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -43,9 +46,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- Require .env (baking its secrets in is the whole point of this script) --
+# --- Require .env (baking its secrets in is the whole point of this script) –
 if [[ ! -f "$envfile" ]]; then
-    echo "No $envfile -- this script bakes the Proxy URL/key from .env into the" >&2
+    echo "No $envfile. This script bakes the Proxy URL/key from .env into the" >&2
     echo "build (sideloaded apps can't be set up via Garmin Connect). Create it" >&2
     echo "(see .env.example), or use build.sh for a clean build." >&2
     exit 1
@@ -80,7 +83,7 @@ echo "Target: $apps_dir/$prgname"
 out="$here/bin/$prgname"
 echo
 echo "Building (with .env baked in)..."
-export CIQ_NO_SIM_UPDATE=1   # deploying to hardware; don't also poke a running sim
+export CIQ_NO_SIM_UPDATE=1   # deploying to hardware. Do not poke a running simulator
 "$here/build.sh" -d "$device" -o "$out" -k "$key" -e "$envfile"
 
 # --- Copy onto the device ---------------------------------------------------
@@ -91,8 +94,8 @@ sync
 echo "Copied $prgname ($(du -h "$apps_dir/$prgname" | cut -f1)) -> $apps_dir"
 
 # Clear a stale settings file so the freshly baked values win. The device writes
-# a <PRG-name>.SET of defaults the first time it accepts the app; one left from
-# an earlier (e.g. clean) build would shadow the new baked Proxy URL/key.
+# a <PRG-name>.SET of defaults the first time it accepts the app. One left from
+# an earlier (for example, clean) build would shadow the new baked Proxy URL/key.
 settings_dir="$apps_dir/SETTINGS"
 if [[ -d "$settings_dir" ]]; then
     # Read into an array: the match is unquoted-glob-safe that way, and a device
@@ -108,7 +111,7 @@ if [[ "$eject" -eq 1 ]]; then
     devnode="$(findmnt -no SOURCE --target "$apps_dir" 2>/dev/null || true)"
     if [[ -n "$devnode" ]] && command -v udisksctl >/dev/null 2>&1; then
         if udisksctl unmount -b "$devnode" >/dev/null 2>&1; then
-            echo "Ejected $devnode -- safe to unplug."
+            echo "Ejected $devnode. Safe to unplug."
         else
             echo "Copied OK, but auto-eject failed; eject it manually before unplugging."
         fi

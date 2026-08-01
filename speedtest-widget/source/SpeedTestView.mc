@@ -21,12 +21,12 @@ const TEST_LAT     = 35.681; // fixed location (Tokyo); the test isn't location-
 const TEST_LON     = 139.767;
 const TEST_Z       = 10;
 // Requested image size: the same the radar widget uses, so the timings mirror
-// it. A cross-project contract -- must match DEVICE_TILE_SIZE in the radar
+// it. A cross-project contract – must match DEVICE_TILE_SIZE in the radar
 // widget's RadarView.mc and in proxy/src/index.js.
 const DEVICE_TILE_SIZE = 288;
 
 // Test phases. A cycle runs WEB then IMG, so exactly one request is ever in
-// flight (single-flight) -- which is what lets mStartMs/mAwaiting be shared
+// flight (single-flight) – which is what lets mStartMs/mAwaiting be shared
 // across both phases instead of tracked per-request.
 const PH_IDLE = 0;
 const PH_WEB  = 1;  // makeWebRequest /frames      (the path that works over BLE)
@@ -35,25 +35,25 @@ const PH_IMG  = 2;  // makeImageRequest /speedtest (routed via Garmin's image se
 
 // Proxy Speed Test: runs up to MAX_CYCLES timed cycles, each a /frames JSON
 // fetch (makeWebRequest) then an image fetch of the proxy's fixed /speedtest
-// asset (makeImageRequest), and shows the results live -- including a per-path
-// running average that settles as the cycles complete -- so you can watch the
+// asset (makeImageRequest), and shows the results live – including a per-path
+// running average that settles as the cycles complete – so you can watch the
 // two transport paths' performance and which one stalls. Built to characterise
 // the radar's Bluetooth problem: over BLE the image path goes via Garmin's
 // image service and is ~30x slower than the raw data path. The /speedtest
 // asset is deterministic and byte-identical on every pull (a real /tile frame
 // varies in size with the weather), so IMG timings are comparable across runs.
-// The image is never drawn; it's only a payload to time. Tap resets the stats
+// The image is never drawn. It's only a payload to time. Tap resets the stats
 // and starts a fresh run.
 class SpeedTestView extends WatchUi.View {
 
     hidden var mProxyBase;
     hidden var mProxyKey;
 
-    hidden var mTick;             // single periodic timer (Timer); null when stopped
+    hidden var mTick;             // single periodic timer (Timer), null when stopped
     hidden var mPhase = PH_IDLE;  // PH_IDLE / PH_WEB / PH_IMG
     hidden var mStartMs = 0;      // System.getTimer() when the in-flight request began
     hidden var mIdleTicks = 0;    // ticks waited since going idle (paces the next cycle)
-    hidden var mAwaiting = false; // true while a request is outstanding; guards stale
+    hidden var mAwaiting = false; // true while a request is outstanding, and guards stale
                                   // (post-timeout) callbacks from double-recording
     hidden var mCycles = 0;
 
@@ -77,7 +77,7 @@ class SpeedTestView extends WatchUi.View {
 
     function readSettings() {
         // Both keys have a default in resources/shared/properties.xml, so getValue
-        // never returns null here -- read directly (no nullable fallback needed).
+        // never returns null here – read directly (no nullable fallback needed).
         mProxyBase = Util.stripSlash(Application.Properties.getValue("proxyBase").toString());
         mProxyKey  = Application.Properties.getValue("proxyKey").toString();
     }
@@ -100,7 +100,7 @@ class SpeedTestView extends WatchUi.View {
     }
 
     // Clear all collected stats and start a fresh run on the next tick. Bound to
-    // a tap (see the delegate), and used by onShow -- so a tap both resets the
+    // a tap (see the delegate), and used by onShow – so a tap both resets the
     // numbers and re-runs the bounded MAX_CYCLES pass. Any in-flight request is
     // abandoned cleanly (mAwaiting=false makes its late callback a no-op).
     function resetStats() as Void {
@@ -154,12 +154,12 @@ class SpeedTestView extends WatchUi.View {
     }
 
     function onFrames(code as Lang.Number, data as Lang.Dictionary or Lang.String or PersistedContent.Iterator or Null) as Void {
-        if (!mAwaiting) { return; }   // already timed out; ignore the late callback
+        if (!mAwaiting) { return; }   // already timed out, so ignore the late callback
         mAwaiting = false;
         record(false, System.getTimer() - mStartMs, code);
 
         // Chain into the image pull. It fetches the fixed /speedtest asset, so
-        // it needs nothing from the /frames response -- run it even when the
+        // it needs nothing from the /frames response – run it even when the
         // WEB phase failed, so each path's stats accumulate independently.
         startImg();
     }
@@ -177,15 +177,15 @@ class SpeedTestView extends WatchUi.View {
         var options = {
             :maxWidth => DEVICE_TILE_SIZE,
             :maxHeight => DEVICE_TILE_SIZE,
-            // Proxy already delivers a small palette PNG; don't re-dither.
+            // Proxy already delivers a small palette PNG. Don't re-dither.
             :dithering => Communications.IMAGE_DITHERING_NONE
         };
         Communications.makeImageRequest(mProxyBase + "/speedtest", params, options, method(:onImage));
     }
 
-    // The image itself is discarded -- we only wanted the transfer time.
+    // The image itself is discarded – we only wanted the transfer time.
     function onImage(code as Lang.Number, data as Graphics.BitmapReference or WatchUi.BitmapResource or Null) as Void {
-        if (!mAwaiting) { return; }   // already timed out; ignore the late callback
+        if (!mAwaiting) { return; }   // already timed out, so ignore the late callback
         mAwaiting = false;
         record(true, System.getTimer() - mStartMs, code);
         mPhase = PH_IDLE;
@@ -195,7 +195,7 @@ class SpeedTestView extends WatchUi.View {
 
     // ---- Stats -------------------------------------------------------------
     // Fold one completed (or timed-out) request into the running stats. isImg
-    // picks which path's counters to update -- the two paths share identical
+    // picks which path's counters to update – the two paths share identical
     // bookkeeping, so a flag is cheaper than duplicating this block.
     function record(isImg as Lang.Boolean, ms as Lang.Number, code as Lang.Number) as Void {
         var ok = (code == 200);
@@ -274,7 +274,7 @@ class SpeedTestView extends WatchUi.View {
     }
 
     // One stats block: coloured header, then "last/ok" and "avg/min/max" rows,
-    // left-aligned. s = [n, ok, last, code, min, max, sum]; returns the new y.
+    // left-aligned. s = [n, ok, last, code, min, max, sum]. Returns the new y.
     function drawBlock(dc, y, fT, title, colour, s as Lang.Array<Lang.Number>) {
         var n = s[0], ok = s[1], last = s[2], code = s[3], mn = s[4], mx = s[5], sum = s[6];
         var x = 8;

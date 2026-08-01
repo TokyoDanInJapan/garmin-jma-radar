@@ -11,19 +11,19 @@
 # simulator.
 #
 # If a simulator is already running, the freshly built app is loaded into it (the
-# fast inner loop). run-sim.sh is the one that launches a *new* simulator; this
+# fast inner loop). run-sim.sh is the one that launches a *new* simulator. This
 # script only refreshes an open one. Skip the auto-load with CIQ_NO_SIM_UPDATE=1.
 #
 # Bakes in optional .env secrets so the proxy URL/token can be added to the build
 # without committing them. The committed resources/shared/properties.xml is always
-# restored afterward.
+# restored afterwards.
 #
 # Usage:
 #   ./build.sh                       # bin/RainRadar.iq (store package, release)
 #   ./build.sh -d edge1040           # bin/RainRadar-edge1040.prg (sideload)
 #   ./build.sh -o /tmp/RainRadar.iq  # custom output path
 #   ./build.sh -k ~/keys/dev.der     # custom developer key
-#   ./build.sh --debug               # debug build (.iq only; .prg is already debug)
+#   ./build.sh --debug               # debug build (.iq only, as .prg already is)
 #
 set -euo pipefail
 
@@ -31,7 +31,7 @@ set -euo pipefail
 # The Connect IQ SDK and its (older) shared-library dependencies live in the
 # 'garmin' distrobox container, not on the host. When invoked from the host,
 # re-exec this script inside that box so the toolchain resolves. Skip with
-# CIQ_NO_BOX=1; rename the target box via CIQ_BOX=<name>.
+# CIQ_NO_BOX=1. Rename the target box via CIQ_BOX=<name>.
 CIQ_BOX="${CIQ_BOX:-garmin}"
 if [ -z "${CIQ_NO_BOX:-}" ] && [ ! -e /run/.containerenv ] && [ ! -e /.dockerenv ] \
    && command -v distrobox >/dev/null 2>&1 \
@@ -41,22 +41,25 @@ fi
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Portable in-place sed (GNU sed wants `-i`; BSD/macOS sed wants `-i ''`).
+# Portable in-place sed (GNU sed wants `-i`, while BSD/macOS sed wants `-i ''`).
 sed_inplace() {
     if sed --version >/dev/null 2>&1; then sed -i "$@"; else sed -i '' "$@"; fi
 }
 
 # --- Defaults ---------------------------------------------------------------
-device=""                              # empty => store .iq; set => single .prg
+device=""                              # empty => store .iq, set => single .prg
 output=""                              # derived from mode if empty
-key="$here/../developer_key.der"       # repo-root key (gitignored; see README §2)
+key="$here/../developer_key.der"       # repo-root key (gitignored, see README §2)
 [ -f "$key" ] || key="$here/../developer_key"   # fall back to the extensionless name
 envfile="$here/.env"
 release=1                              # store packages should be release builds
 baked=0                                # set to 1 once .env secrets are injected
 
+# Print the header comment block as help. Derived from the file rather than a
+# fixed line range, which silently truncated the examples whenever the header
+# grew: drop the shebang, stop at the first non-comment line, strip the '# '.
 usage() {
-    sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "${BASH_SOURCE[0]}"
     exit "${1:-0}"
 }
 
@@ -75,7 +78,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Locate the Connect IQ SDK ----------------------------------------------
-# Prefer monkeyc already on PATH; otherwise resolve the active SDK the way the
+# Prefer monkeyc already on PATH. Otherwise resolve the active SDK the way the
 # SDK Manager records it (~/.Garmin/ConnectIQ/current-sdk.cfg), then fall back
 # to the newest installed SDK folder.
 if ! command -v monkeyc >/dev/null 2>&1; then
@@ -196,9 +199,10 @@ echo "Built $output"
 
 # --- Load into a running simulator, if one is open --------------------------
 # A plain build refreshes whatever the simulator is currently showing (the fast
-# inner loop; run-sim.sh is the one that launches a *new* sim). monkeydo can
+# inner loop, and run-sim.sh is the one that launches a *new* simulator).
+# monkeydo can
 # only side-load a single-device .prg, so: if this build already produced one we
-# load it directly; for a store .iq we compile a .prg for the sim's current
+# load it directly. For a store .iq we compile a .prg for the simulator's current
 # device (LastUsedDevice in simulator.ini) and load that. Opt out with
 # CIQ_NO_SIM_UPDATE=1 (run-sim.sh sets this so it can manage loading itself).
 if [[ -z "${CIQ_NO_SIM_UPDATE:-}" ]] && pgrep -x simulator >/dev/null 2>&1; then
@@ -209,7 +213,7 @@ if [[ -z "${CIQ_NO_SIM_UPDATE:-}" ]] && pgrep -x simulator >/dev/null 2>&1; then
             sim_device="$device"
             prg="$output"
         else
-            # No device built; target the device the sim already has loaded.
+            # No device built. Target the device the simulator already has loaded.
             sim_ini="$HOME/.Garmin/ConnectIQ/simulator.ini"
             sim_device=""
             [[ -f "$sim_ini" ]] && sim_device="$(sed -nE 's/^LastUsedDevice=//p' "$sim_ini" | tr -d '[:space:]')"
@@ -226,15 +230,15 @@ if [[ -z "${CIQ_NO_SIM_UPDATE:-}" ]] && pgrep -x simulator >/dev/null 2>&1; then
                 build_prg "$sim_device" "$prg"
             fi
 
-            # Only wipe the sim's stored app settings when we actually baked in
-            # .env secrets (so they win); otherwise keep what the user set in the
-            # running sim across rebuilds.
+            # Only wipe the simulator's stored app settings when we actually baked in
+            # .env secrets (so they win). Otherwise keep what the user set in the
+            # running simulator across rebuilds.
             #
-            # The sim names the .SET after the uppercased .prg BASENAME, not the
+            # The simulator names the .SET after the uppercased .prg BASENAME, not the
             # AppName: loading radar-test.prg yields RADAR-TEST.SET, and AppName
             # here is "Rain Radar JP". This used to strip the "-<device>" suffix
             # on the theory that the name came from AppName, so it looked for
-            # RAINRADAR.SET while the sim had written RAINRADAR-EDGE1040.SET --
+            # RAINRADAR.SET while the simulator had written RAINRADAR-EDGE1040.SET –
             # the file never matched and stale settings were never cleared.
             if [[ "$baked" -eq 1 ]]; then
                 tmpbase="${TMPDIR:-/tmp}"
@@ -247,10 +251,10 @@ if [[ -z "${CIQ_NO_SIM_UPDATE:-}" ]] && pgrep -x simulator >/dev/null 2>&1; then
                 fi
             fi
 
-            # A successful monkeydo stays attached (no exit, no output); a failure
+            # A successful monkeydo stays attached (no exit, no output). A failure
             # prints "Unable to connect" and exits. So: alive after a short window
-            # with no error == loaded. Keep the load best-effort -- the build has
-            # already succeeded, so never fail the script on a sim hiccup.
+            # with no error == loaded. Keep the load best-effort – the build has
+            # already succeeded, so never fail the script on a simulator hiccup.
             echo "Sim:    loading into running simulator ($sim_device)..."
             mdlog="${TMPDIR:-/tmp}/rainradar-monkeydo.log"; : > "$mdlog"
             monkeydo "$prg" "$sim_device" >"$mdlog" 2>&1 &

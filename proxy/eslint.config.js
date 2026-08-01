@@ -2,7 +2,7 @@
 //
 // This complements `npm run typecheck` rather than duplicating it: tsc --checkJs
 // validates the JSDoc types on src/, and ESLint catches the things types don't
-// -- unused bindings, accidental globals, sloppy equality, unreachable code --
+// – unused bindings, accidental globals, sloppy equality, unreachable code –
 // across all three source trees, including test/ and scripts/ which tsconfig
 // deliberately leaves out of scope.
 import js from "@eslint/js";

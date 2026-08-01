@@ -2,11 +2,11 @@ using Toybox.Lang;
 
 // Pure, side-effect-free helpers used by the radar view: string/number munging
 // and response-code formatting. Kept out of RadarView so they can be unit-tested
-// without a WatchUi/Communications/Application context (see UtilTest.mc) -- the
+// without a WatchUi/Communications/Application context (see UtilTest.mc) – the
 // view itself is hard to instantiate in a test, these are trivial to call.
 module Util {
 
-    // Clamp a number to [lo, hi]. A null value (e.g. a missing setting) snaps to
+    // Clamp a number to [lo, hi]. A null value (for example, a missing setting) snaps to
     // the low end so callers always get a usable number back.
     function clampNum(v as Lang.Number or Null, lo as Lang.Number, hi as Lang.Number) as Lang.Number {
         if (v == null) { return lo; }
@@ -17,9 +17,9 @@ module Util {
 
     // Frames to request for the current connection. `setting` is the user's
     // frameCount (the Wi-Fi maximum). On Wi-Fi the image path is fast so we load
-    // them all; otherwise (Bluetooth, or unknown) throttle to `cap`, since image
+    // them all. Otherwise (Bluetooth, or unknown) throttle to `cap`, since image
     // pulls are ~30x slower over BLE (Garmin's image service). Never exceeds the
-    // setting -- a user who picked fewer than the cap keeps their choice.
+    // setting – a user who picked fewer than the cap keeps their choice.
     function frameCountFor(setting as Lang.Number, isWifi as Lang.Boolean, cap as Lang.Number) as Lang.Number {
         if (!isWifi && setting > cap) { return cap; }
         return setting;
@@ -48,7 +48,7 @@ module Util {
         return out;
     }
 
-    // Parse a "k1=v1&k2=v2" query string into a params Dictionary; pairs without
+    // Parse a "k1=v1&k2=v2" query string into a params Dictionary. Pairs without
     // an "=" are skipped. makeImageRequest won't accept a query string embedded in
     // the URL (it encodes the "?" into the path, so the proxy 404s), so a tile
     // URL's query has to be handed over as the params dictionary instead.
@@ -71,22 +71,22 @@ module Util {
         return ((off > 0) ? "+" : "") + off + "m";
     }
 
-    // Retry server/transport errors (5xx, rate-limit, BLE/network) -- these are
+    // Retry server/transport errors (5xx, rate-limit, BLE/network) – these are
     // transient, most often Garmin's image-fetch service flaking on a tile the
-    // proxy itself serves fine. Don't retry auth/4xx; those won't fix themselves.
+    // proxy itself serves fine. Don't retry auth/4xx. Those won't fix themselves.
     function isRetryable(code as Lang.Number) as Lang.Boolean {
         return code <= 0 || code == 429 || code >= 500;
     }
 
     // Map a Communications response code to a short user-facing message. CIQ
     // reports transport failures (phone/BLE/network down) as zero/negative
-    // codes; positive values are the HTTP status from the proxy. The proxy's
+    // codes. Positive values are the HTTP status from the proxy. The proxy's
     // own failure modes are called out explicitly: auth (401), rate-limit (429),
     // and upstream/render errors (5xx).
     function httpErrorMsg(code as Lang.Number) as Lang.String {
         if (code <= 0)   { return "No phone connection"; }
-        if (code == 401) { return "Auth failed - check key"; }
-        if (code == 429) { return "Server busy - try later"; }
+        if (code == 401) { return "Auth failed: check key"; }
+        if (code == 429) { return "Server busy: try later"; }
         if (code >= 500) { return "Server error (" + code + ")"; }
         return "Request failed (" + code + ")";
     }

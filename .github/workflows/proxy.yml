@@ -1,6 +1,6 @@
 name: proxy
 
-# Build/test the proxy on every PR; deploy to Cloudflare Workers only on push to
+# Build/test the proxy on every PR. Deploy to Cloudflare Workers only on push to
 # main.
 #
 # The path filter is on `push` but deliberately NOT on `pull_request`: it keeps
@@ -43,7 +43,7 @@ jobs:
       # gating on those would just train us to ignore this step.
       - run: npm audit --omit=dev --audit-level=high
       # Validate the Worker bundles and wrangler.toml parses (incl. the
-      # ratelimit binding). Local-only - needs no Cloudflare credentials.
+      # ratelimit binding). Local-only – needs no Cloudflare credentials.
       - run: npx wrangler deploy --dry-run --outdir dist
 
   deploy:
@@ -53,7 +53,7 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
       || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # Cloudflare credentials live in this environment's secrets; its branch
+    # Cloudflare credentials live in this environment's secrets. Its branch
     # policy only allows deployments from main.
     environment: production
     steps:
@@ -85,7 +85,7 @@ jobs:
       # A successful `wrangler deploy` only means Cloudflare accepted the upload.
       # /health is unauthenticated precisely so it can be probed here: `ok`
       # proves the Worker boots and routes, and `rateLimiter` proves the
-      # RATE_LIMITER binding in wrangler.toml actually materialised at runtime --
+      # RATE_LIMITER binding in wrangler.toml actually materialised at runtime –
       # the one part of the config that silently no-ops when it's wrong.
       - name: Smoke-test the deployment
         env:
@@ -118,7 +118,7 @@ jobs:
             exit 1
           fi
           if [[ "$(jq -r '.rateLimiter' <<<"$body")" != "true" ]]; then
-            echo "::error::RATE_LIMITER is not bound in the deployed Worker -- /frames and /tile are unprotected"
+            echo "::error::RATE_LIMITER is not bound in the deployed Worker. /frames and /tile are unprotected"
             exit 1
           fi
           echo "Deployment verified: routing up, rate-limit binding live."

@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * Base-map tiles. The JMA nowcast viewer renders the radar over GSI (地理院)
- * tiles, served from JMA's own mirror - this is the viewer's "slmcs" layer.
+ * tiles, served from JMA's own mirror – this is the viewer's "slmcs" layer.
  * Same z/x/y slippy-map scheme as the radar tiles.
  *
  * The base map's content is GSI's, so its attribution (出典: 国土地理院) is
@@ -9,7 +9,7 @@
  *
  * "english" carries English place labels (matches an English-language widget);
  * "pale" is the Japanese light style. The viewer desaturates the base to
- * grayscale client-side; we replicate that in composite.js so the radar pops.
+ * greyscale client-side. We replicate that in composite.js so the radar pops.
  */
 
 const GSI_MIRROR = "https://www.jma.go.jp/tile/gsi";

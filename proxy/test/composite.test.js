@@ -37,7 +37,7 @@ test("composite emits a PNG of the requested output size", async () => {
 
 test("composite output is a small indexed-palette PNG (<=16 colours, <=4-bit)", async () => {
   // The encoder posterizes the base map and quantizes to <=16 colours so the
-  // frame is a 4-bit indexed PNG -- smaller over the wire and ~half the on-device
+  // frame is a 4-bit indexed PNG – smaller over the wire and ~half the on-device
   // bytes/px. Guard it so a future encoder tweak can't silently regress to
   // truecolour or an 8-bit palette (which blows the device memory budget).
   const base = neighbourhood(solidTile([100, 150, 200, 255]));

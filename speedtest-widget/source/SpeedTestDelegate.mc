@@ -1,6 +1,6 @@
 using Toybox.WatchUi;
 
-// Input for the speed-test view: a tap/select resets the collected stats; back
+// Input for the speed-test view: a tap/select resets the collected stats. Back
 // dismisses the widget. The test loop runs on its own timer regardless.
 class SpeedTestDelegate extends WatchUi.BehaviorDelegate {
 

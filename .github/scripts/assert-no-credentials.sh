@@ -5,7 +5,7 @@
 # The risk is real and specific: build.sh injects PROXY_BASE/PROXY_KEY from a
 # git-ignored .env into resources/shared/properties.xml for the duration of a
 # build. A key baked that way is compiled into the .prg binary AND into the
-# generated <name>-settings.json -- verified by baking a sentinel token and
+# generated <name>-settings.json – verified by baking a sentinel token and
 # finding it in both. Release assets are public, so a mistake here publishes the
 # shared secret that gates /frames and /tile.
 #
@@ -46,7 +46,7 @@ for dir in "${dirs[@]}"; do
 
         key="$(jq -r '.settings[]? | select(.key == "proxyKey") | .defaultValue' "$settings")"
         if [[ -n "$key" && "$key" != "null" ]]; then
-            # Never print the value itself -- this output is a public build log.
+            # Never print the value itself – this output is a public build log.
             echo "::error::$name ships a non-empty proxyKey default (${#key} chars)"
             status=1
         else
@@ -54,8 +54,8 @@ for dir in "${dirs[@]}"; do
         fi
 
         base="$(jq -r '.settings[]? | select(.key == "proxyBase") | .defaultValue' "$settings")"
-        # Not fatal on its own -- a base URL is not a secret, and shipping a
-        # real one may one day be deliberate -- but it means .env was applied,
+        # Not fatal on its own – a base URL is not a secret, and shipping a
+        # real one may one day be deliberate – but it means .env was applied,
         # so say so loudly.
         if [[ "$base" != *YOURNAME* ]]; then
             echo "::warning::$name has a non-placeholder proxyBase; was this built with .env applied?"
@@ -64,7 +64,7 @@ for dir in "${dirs[@]}"; do
 done
 
 if [[ "$checked" -eq 0 ]]; then
-    echo "::error::no *-settings.json found under: ${dirs[*]} -- the credential check verified nothing"
+    echo "::error::no *-settings.json found under: ${dirs[*]}. The credential check verified nothing"
     exit 1
 fi
 

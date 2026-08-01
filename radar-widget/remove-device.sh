@@ -4,15 +4,16 @@
 # radar disappears from the widget loop on the next connect/boot. (To remove the
 # speed-test widget instead, use speedtest-widget/remove-device.sh.)
 #
-# What it deletes: the app binary in BOTH places the device keeps it -- the
+# What it deletes: the app binary in BOTH places the device keeps it – the
 # staging copy in GARMIN/Garmin/Apps/ (present until the device imports it) and
-# the installed copy in Apps/Media/ -- plus its settings file (best effort; the
+# the installed copy in Apps/Media/ – plus its settings file (best effort,
+# because the
 # device sometimes renames the .SET to an internal id we can't match).
 #
 # Usage:
 #   ./remove-device.sh              # find the device, remove, eject
 #   ./remove-device.sh --dest <dir> # explicit GARMIN/.../Apps folder
-#   ./remove-device.sh --no-eject   # leave the device mounted afterward
+#   ./remove-device.sh --no-eject   # leave the device mounted afterwards
 #   ./remove-device.sh -h
 #
 set -euo pipefail
@@ -22,7 +23,10 @@ eject=1
 prgname="RainRadar.PRG"
 appname="Rain Radar JP"
 
-usage() { sed -n '3,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# Print the header comment block as help. Derived from the file rather than a
+# fixed line range, which silently truncated the examples whenever the header
+# grew: drop the shebang, stop at the first non-comment line, strip the '# '.
+usage() { sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "${BASH_SOURCE[0]}"; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -61,7 +65,7 @@ for f in "$apps_dir/$prgname" "$apps_dir/Media/$prgname"; do
     if [[ -f "$f" ]]; then rm -f "$f" && echo "Removed $(du -h "$f" 2>/dev/null | cut -f1 || echo)  $f" && removed=1; fi
 done
 # Settings file is named after the app, but the case varies by device, hence
-# -iname. The device may instead store it under an internal id we can't match --
+# -iname. The device may instead store it under an internal id we can't match –
 # harmless to leave (it's ignored once the app is gone, cleared on reinstall).
 #
 # find, not a glob: the path we're matching contains no glob metacharacters, so
@@ -82,7 +86,7 @@ fi
 if [[ "$eject" -eq 1 ]]; then
     devnode="$(findmnt -no SOURCE --target "$apps_dir" 2>/dev/null || true)"
     if [[ -n "$devnode" ]] && command -v udisksctl >/dev/null 2>&1; then
-        udisksctl unmount -b "$devnode" >/dev/null 2>&1 && echo "Ejected $devnode -- safe to unplug." \
+        udisksctl unmount -b "$devnode" >/dev/null 2>&1 && echo "Ejected $devnode. Safe to unplug." \
             || echo "Done, but auto-eject failed; eject manually before unplugging."
     else
         echo "Done; eject the device manually before unplugging."

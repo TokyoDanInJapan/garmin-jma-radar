@@ -5,7 +5,7 @@ import { ENV, CTX, installDefaults } from "./helpers.js";
 
 // End-to-end tests for the request pipeline (handleFrames / handleTile and the
 // fetchNeighbourhood -> fetchTilePNG -> composite path). The auth/validation
-// layer is covered in handler.test.js; here the shared stubs (helpers.js) for
+// layer is covered in handler.test.js. Here the shared stubs (helpers.js) for
 // global fetch + caches let the requests run all the way through to a JSON
 // list / composited PNG.
 

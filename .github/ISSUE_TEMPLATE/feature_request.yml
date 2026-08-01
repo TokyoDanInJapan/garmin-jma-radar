@@ -5,10 +5,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Worth a look at the Scope section of
-        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) first -- weather sources
-        outside Japan and anything requiring the proxy to store user data are
-        deliberately out of scope.
+        Read the Scope section of
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) first. Weather sources
+        outside Japan, and anything that requires the proxy to store user data,
+        are deliberately out of scope.
 
   - type: textarea
     id: problem
@@ -30,5 +30,5 @@ body:
     attributes:
       label: Anything that makes this tricky?
       description: |
-        Optional. Device memory is the usual wall -- the widget can hold at most
-        six 288px frames before it OOMs mid-load.
+        Optional. Device memory is the usual wall. The widget can hold at most
+        six 288px frames before it runs out of memory mid-load.

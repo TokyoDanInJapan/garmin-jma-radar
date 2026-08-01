@@ -51,7 +51,7 @@
     },
     {
       // Run the Worker locally with `wrangler dev` (hot reload). Reads local
-      // secrets (PROXY_TOKEN) from proxy/.dev.vars - see .dev.vars.example.
+      // secrets (PROXY_TOKEN) from proxy/.dev.vars – see .dev.vars.example.
       // Long-running, so mark it background.
       "label": "Proxy: Dev",
       "type": "shell",
@@ -83,8 +83,8 @@
       "presentation": { "reveal": "always", "panel": "dedicated" }
     },
     {
-      // Deploy the Worker to Cloudflare (`wrangler deploy`). Needs an authorized
-      // wrangler (npx wrangler login) - normally CI deploys on push to main, so
+      // Deploy the Worker to Cloudflare (`wrangler deploy`). Needs an authorised
+      // wrangler (npx wrangler login) – normally CI deploys on push to main, so
       // use this for manual/out-of-band deploys.
       "label": "Proxy: Deploy",
       "type": "shell",

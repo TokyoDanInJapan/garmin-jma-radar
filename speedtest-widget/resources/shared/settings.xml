@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Lets users set the proxy URL/key from Garmin Connect without a rebuild. -->
+<!-- Lets users set the proxy URL and key from Garmin Connect, with no rebuild. -->
 <resources>
     <settings>
         <setting propertyKey="@Properties.proxyBase" title="@Strings.SetProxyBase">
