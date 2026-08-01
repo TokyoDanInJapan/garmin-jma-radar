@@ -8,6 +8,8 @@ the proxy deploys continuously from `main` and is not separately versioned.
 
 ## Unreleased
 
+## [1.0.0] - 2026-08-01
+
 ### Added
 
 - CI for the Connect IQ widgets (`.github/workflows/widgets.yml`): headless SDK
@@ -68,3 +70,5 @@ the proxy deploys continuously from `main` and is not separately versioned.
 - `proxy.yml`'s path filter now applies to `push` only, not `pull_request`, so
   the `test` check reports on every PR and can be required without deadlocking
   PRs that don't touch `proxy/**`.
+
+[1.0.0]: https://github.com/TokyoDanInJapan/garmin-jma-radar/releases/tag/v1.0.0
