@@ -9,7 +9,7 @@ const TILE = 256;
 /**
  * Convert lon/lat -> integer tile (x,y) at zoom z, plus the pixel position
  * (px,py) of the point WITHIN that tile (0..255). The pixel position lets the
- * proxy crop a window centered exactly on the rider rather than tile-aligned.
+ * proxy crop a window centred exactly on the rider rather than tile-aligned.
  */
 export function lonLatToTileXY(lon, lat, z) {
   const n = Math.pow(2, z);

@@ -2,7 +2,7 @@ name: release
 
 # Tag a release and attach the built widget packages, so there is a record of
 # which commit is on a device or in the Connect IQ Store. The proxy is not
-# versioned this way -- it deploys continuously from main.
+# versioned this way – it deploys continuously from main.
 #
 #   git tag -a v0.2.0 -m "..." && git push origin v0.2.0
 on:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to build a release for (e.g. v0.2.0)'
+        description: 'Existing tag to build a release for, for example v0.2.0'
         required: true
 
 permissions:
@@ -26,7 +26,7 @@ jobs:
     container: ubuntu:22.04
     permissions:
       contents: write      # create the release and upload assets
-    # Container jobs default to `sh -e {0}`, not bash; the steps below use
+    # Container jobs default to `sh -e {0}`, not bash. The steps below use
     # `[[ ]]` and `set -o pipefail`.
     defaults:
       run:
@@ -63,8 +63,8 @@ jobs:
 
       # A Connect IQ Store listing is bound to the developer key that first
       # published it, so a Store-uploadable .iq must be signed with the real one.
-      # With the secret set we produce exactly that; without it we still build,
-      # but only for sideloading -- and say so in the release notes rather than
+      # With the secret set we produce exactly that. Without it we still build,
+      # but only for sideloading – and say so in the release notes rather than
       # shipping something that looks Store-ready and isn't.
       - name: Resolve signing key
         id: key
@@ -92,7 +92,7 @@ jobs:
       #                          signed with the key that published the
       #                          listing, and not sideloadable.
       #
-      # Attaching only the .iq -- which is what this workflow did originally --
+      # Attaching only the .iq – which is what this workflow did originally –
       # produces a release nobody can use without the signing secret: wrong key
       # for the Store, wrong format for sideloading.
       - name: Build release packages
@@ -121,7 +121,7 @@ jobs:
       # by baking a sentinel token and finding it in both), so publishing a
       # wrongly-built artifact would disclose the shared secret gating /frames
       # and /tile. This job calls monkeyc directly and CI has no .env, so the
-      # baked default is empty -- assert it before upload rather than trust it.
+      # baked default is empty – assert it before upload rather than trust it.
       - name: Assert no proxy credential is baked in
         run: .github/scripts/assert-no-credentials.sh dist
 
@@ -148,7 +148,7 @@ jobs:
             echo "a Store install of the same app."
             echo
             echo "You still need to set the proxy URL and key in the widget's"
-            echo "settings -- these builds have no credentials baked in."
+            echo "settings. These builds have no credentials baked in."
             echo
             echo "### Store bundle"
             echo
@@ -156,7 +156,7 @@ jobs:
             echo "$iq_note"
             echo
             echo "\`*.prg.debug.xml\` is the symbol map for the matching build."
-            echo "Attach it to a bug report if the app crashes -- a release build"
+            echo "Attach it to a bug report if the app crashes. A release build"
             echo "strips debug info, so the stack trace in \`GARMIN/APPS/LOGS/CIQ_LOG.YML\`"
             echo "cannot be decoded without it."
             echo
@@ -165,7 +165,7 @@ jobs:
 
           # Explicit globs, not dist/*: the .prg build also drops a
           # <name>-settings.json next to each binary, which is build scaffolding
-          # nobody downloads. The .prg.debug.xml is kept deliberately -- it is
+          # nobody downloads. The .prg.debug.xml is kept deliberately – it is
           # the symbol map for that exact build, and a release .prg (-r strips
           # debug info) produces stack traces in CIQ_LOG.YML that cannot be
           # decoded without it. It is not reproducible after the fact.

@@ -1,28 +1,28 @@
 # Contributing
 
-Thanks for taking a look. This is a small project with a narrow scope -- a rain
-radar for Garmin Edge devices, in Japan -- so the most useful contributions are
-bug reports from real rides, and fixes that keep the moving parts simple.
+Thanks for taking a look. This is a small project with a narrow scope: a rain
+radar for Garmin Edge devices, in Japan. The most useful contributions are bug
+reports from real rides, and fixes that keep the moving parts simple.
 
 ## Scope
 
 **In scope:** correctness and reliability of the radar, proxy caching and cost,
-Connect IQ device support, docs.
+Connect IQ device support, and the docs.
 
-**Out of scope:** weather sources outside Japan (the JMA nowcast is the whole
-point), and anything that requires the proxy to store user data. The proxy
+**Out of scope:** weather sources outside Japan, because the JMA nowcast is the
+whole point, and anything that requires the proxy to store user data. The proxy
 deliberately keeps no state beyond edge cache entries keyed on tile geometry.
 
 ## Getting set up
 
-- **Proxy only** (`proxy/`): Node 22+. `cd proxy && npm ci`. No Garmin toolchain
-  needed.
+- **Proxy only** (`proxy/`): Node 22 or newer. Run `cd proxy && npm ci`. You need
+  no Garmin toolchain.
 - **Widgets** (`radar-widget/`, `speedtest-widget/`): see
-  [docs/connect-iq-sdk.md](docs/connect-iq-sdk.md). On Ubuntu 24.10+, `./setup.sh`
-  from the repo root does everything.
+  [docs/connect-iq-sdk.md](docs/connect-iq-sdk.md). On Ubuntu 24.10 or newer,
+  `./setup.sh` from the repo root does everything.
 
-Install the pre-commit hooks once per clone -- they run the same gitleaks,
-shellcheck and actionlint checks CI does:
+Install the pre-commit hooks once per clone. They run the same gitleaks,
+shellcheck and actionlint checks that CI runs:
 
 ```bash
 pipx install pre-commit   # or brew / pip
@@ -32,7 +32,7 @@ pre-commit run --all-files
 
 ## Running the checks locally
 
-Everything CI enforces, you can run yourself:
+You can run everything CI enforces:
 
 ```bash
 # proxy
@@ -56,73 +56,74 @@ monkeydo bin/test.prg edge1040 -t
 ## Conventions that matter here
 
 **Comments explain *why*.** The existing code documents the non-obvious
-constraint behind a decision -- why the cache key is tile geometry rather than
-raw lat/lon, why `monkeydo`'s exit code can't be trusted, why the base resource
-path can't point at `resources/`. Match that. Don't add comments that restate the
-code.
+constraint behind a decision: why the cache key is tile geometry rather than raw
+lat/lon, why `monkeydo`'s exit code cannot be trusted, and why the base resource
+path cannot point at `resources/`. Match that. Do not add comments that restate
+the code.
 
 **JMA specifics stay in `proxy/src/jma.js`.** Those endpoints are undocumented
-and will change without notice; one file should absorb that.
+and will change without notice. One file should absorb that.
 
 **The device tile size is a cross-project contract.** `DEVICE_TILE_SIZE` (288) is
 duplicated in `proxy/src/index.js`, `radar-widget/source/RadarView.mc` and
 `speedtest-widget/source/SpeedTestView.mc`. Change all three together.
 
-**Frame count is bounded by device memory.** `MAX_FRAMES = 6` in `jma.js` isn't
-arbitrary -- a 7th 288px frame OOMs the widget mid-load.
+**Frame count is bounded by device memory.** `MAX_FRAMES = 6` in `jma.js` is not
+arbitrary. A seventh 288px frame makes the widget run out of memory mid-load.
 
-**Never commit secrets.** `build.sh` bakes `PROXY_BASE`/`PROXY_KEY` from a
+**Never commit secrets.** `build.sh` bakes `PROXY_BASE` and `PROXY_KEY` from a
 git-ignored `.env` into `resources/shared/properties.xml` for the duration of a
-build and restores it afterwards. That restore is the single most dangerous thing
-in the repo; gitleaks runs pre-commit and in CI because of it.
+build, then restores the file afterwards. That restore is the single most
+dangerous thing in the repo. gitleaks runs pre-commit and in CI because of it.
 
-**Never publish them either.** gitleaks only sees what reaches git, and a baked
-key never does -- the restore removes it. But it *is* compiled into the `.prg`
-and into the generated `<name>-settings.json`, both of which CI uploads and
-releases publish. `.github/scripts/assert-no-credentials.sh` runs in both
-workflows and fails the build if the compiled `proxyKey` default is non-empty,
-or if a `.env` is present in the build tree at all. Keep that check ahead of any
-step that uploads an artifact.
+**Never publish those secrets either.** gitleaks only sees what reaches git, and
+a baked key never does, because the restore removes it. But the key *is* compiled
+into the `.prg` and into the generated `<name>-settings.json`, and CI uploads
+both of those files while releases publish them.
+`.github/scripts/assert-no-credentials.sh` runs in both workflows. The script
+fails the build if the compiled `proxyKey` default is non-empty, or if a `.env`
+is present in the build tree at all. Keep that check ahead of any step that
+uploads an artifact.
 
 ## Typecheck levels
 
 Monkey C builds are gated at `-l 1`, which both widgets pass with zero warnings.
-Levels 2 and 3 currently surface ~360 "untyped member" findings. Raising the bar
-would be welcome, but it's an annotation project -- please do it as its own PR
-rather than mixing it into a behaviour change.
+Levels 2 and 3 currently surface about 360 'untyped member' findings. Raising the
+bar would be welcome, but it is an annotation project. Please do it as its own
+PR, rather than mixing it into a behaviour change.
 
 ## Pull requests
 
-- Branch off `main`; `main` requires a PR and passing checks.
-- Keep commits focused -- one concern each, with a message that says why.
-- CI must be green: `proxy`, `widgets`, `lint`, `secret-scan`.
+- Branch off `main`. `main` requires a PR and passing checks.
+- Keep commits focused: one concern each, with a message that says why.
+- CI must be green: `proxy`, `widgets`, `lint` and `secret-scan`.
 - Add a CHANGELOG entry under `## Unreleased` for anything user-visible.
 
 ## Releases
 
-Widgets are released by tag; the proxy deploys continuously from `main`.
+Widgets are released by tag. The proxy deploys continuously from `main`.
 
 ```bash
 git tag -a v0.2.0 -m "..." && git push origin v0.2.0
 ```
 
-That attaches, per widget and per product in its manifest:
+A tag attaches these files, per widget and per product in its manifest:
 
-- `<widget>-<device>.prg` -- sideloadable. Copy to `GARMIN/APPS` over USB. Works
-  with any signing key, so CI's ephemeral one is fine.
-- `<widget>.iq` -- the Store bundle. Only uploadable when signed with the key
-  that published the listing, so set `GARMIN_DEVELOPER_KEY` (base64-encoded DER)
-  to get one you can actually ship.
-- `<widget>-<device>.prg.debug.xml` -- symbol map for that build. A release
-  build strips debug info, so a `CIQ_LOG.YML` stack trace can't be decoded
-  without it, and it can't be regenerated after the fact.
+- `<widget>-<device>.prg` – sideloadable. Copy it to `GARMIN/APPS` over USB. It
+  works with any signing key, so the ephemeral key CI generates is fine.
+- `<widget>.iq` – the Store bundle. You can upload it only when it is signed with
+  the key that published the listing. Set `GARMIN_DEVELOPER_KEY` (base64-encoded
+  DER) to get a bundle you can actually ship.
+- `<widget>-<device>.prg.debug.xml` – the symbol map for that build. A release
+  build strips debug info, so a `CIQ_LOG.YML` stack trace cannot be decoded
+  without the symbol map, and the map cannot be regenerated after the fact.
 
-None of these have proxy credentials baked in -- CI has no `.env`, so users set
-the proxy URL and key in the widget's settings.
+None of these files have proxy credentials baked in. CI has no `.env`, so users
+set the proxy URL and key in the widget's settings.
 
 ## Reporting bugs
 
 Use the issue templates. For a widget bug, `Garmin/Apps/LOGS/CIQ_LOG.YML` on the
-device carries the exception and stack trace and is usually the whole answer.
-Security issues go through [private vulnerability reporting](SECURITY.md), not
-public issues.
+device carries the exception and the stack trace, and is usually the whole
+answer. Security issues go through
+[private vulnerability reporting](SECURITY.md), not public issues.

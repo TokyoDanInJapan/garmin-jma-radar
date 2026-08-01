@@ -3,14 +3,14 @@ using Toybox.Lang;
 
 // Unit tests for FramePipeline: the single-flight / retry / epoch / watchdog
 // logic, driven through a fake fetcher instead of Communications. This is the
-// logic that used to live untestable inside RadarView; extracting it is what
+// logic that used to live untestable inside RadarView. Extracting it is what
 // makes these tests possible. Run like UtilTest.mc:
 //   monkeyc -f monkey.jungle -o bin/test.prg -y <dev_key> -d edge1040 --unit-test
 //   monkeydo bin/test.prg edge1040 -t
 
-// Fake transport. Records every fetch; the test then either invokes the
+// Fake transport. Records every fetch. The test then either invokes the
 // captured callback by hand (async mode) or, with syncCode set, responds from
-// inside fetch() itself -- which exercises the pipeline's synchronous-callback
+// inside fetch() itself – which exercises the pipeline's synchronous-callback
 // re-entrancy path (the mPumping guard).
 (:test)
 class FakeFetcher {
@@ -54,7 +54,7 @@ function testPipelineSingleFlightAndUrlSplit(logger) {
     if (!c.get(:params).get("a").equals("1")) { return false; }
     if (!c.get(:params).get("key").equals("K")) { return false; }
 
-    // Completing frame 0 pumps frame 1; and so on until done.
+    // Completing frame 0 pumps frame 1, and so on until done.
     f.lastCb().onDone(200, "BMP0");
     if (f.calls.size() != 2 || p.inflightIndex() != 1) { return false; }
     f.lastCb().onDone(200, "BMP1");
@@ -68,7 +68,7 @@ function testPipelineSingleFlightAndUrlSplit(logger) {
 function testPipelineSynchronousCallbacksDontRecurse(logger) {
     // A fetcher that succeeds from inside fetch() models makeImageRequest
     // invoking its callback synchronously. The mPumping guard must turn the
-    // nested pump into a loop; all frames complete, one request each.
+    // nested pump into a loop. All frames complete, one request each.
     var f = new FakeFetcher();
     f.syncCode = 200;
     f.syncData = "BMP";
@@ -76,7 +76,7 @@ function testPipelineSynchronousCallbacksDontRecurse(logger) {
     var p = new FramePipeline(l, f, null);
     p.start(["/t?i=0", "/t?i=1", "/t?i=2", "/t?i=3", "/t?i=4", "/t?i=5"], "https://proxy", "K");
     // 6 completion notifies + 1 from the end of start() (which reflects cache
-    // hits; here there are none, but the notify still fires).
+    // hits, and here there are none, but the notify still fires).
     return f.calls.size() == 6 && p.loadedCount() == 6
         && p.done() && l.changes == 7;
 }
@@ -87,7 +87,7 @@ function testPipelineRetriesTransientFailure(logger) {
     var p = new FramePipeline(new FakeListener(), f, null);
     p.start(["/t?i=0"], "https://proxy", "K");
 
-    // Two 500s -> re-queued and re-requested each time; then a success lands.
+    // Two 500s -> re-queued and re-requested each time. Then a success lands.
     f.lastCb().onDone(500, null);
     if (f.calls.size() != 2) { return false; }
     f.lastCb().onDone(500, null);
@@ -137,14 +137,14 @@ function testPipelineWatchdogAbandonsAndLateSuccessIsSalvaged(logger) {
     p.start(["/t?i=0"], "https://proxy", "K");
     var staleCb = f.lastCb();
 
-    // No callback arrives; the watchdog fires after IMAGE_TIMEOUT_TICKS and
+    // No callback arrives. The watchdog fires after IMAGE_TIMEOUT_TICKS and
     // re-queues the frame, so a replacement request goes out.
     for (var i = 0; i < IMAGE_TIMEOUT_TICKS; i += 1) { p.tick(); }
     if (f.calls.size() != 2 || !p.isAwaiting()) { return false; }
 
     // The abandoned transfer was slow, not dead (the normal case over BLE):
     // its late 200 is salvaged into the frame slot, but the single-flight
-    // bookkeeping -- which now belongs to the replacement -- is untouched.
+    // bookkeeping – which now belongs to the replacement – is untouched.
     staleCb.onDone(200, "LATE");
     if (p.loadedCount() != 1 || !p.isFrameLoaded(0) || !p.isAwaiting()) { return false; }
 
@@ -161,8 +161,8 @@ function testPipelineLateFailureIsIgnored(logger) {
     p.start(["/t?i=0"], "https://proxy", "K");
     var staleCb = f.lastCb();
 
-    // Watchdog abandons; the late callback is a FAILURE, so there's nothing to
-    // salvage -- it must not disturb the replacement either.
+    // Watchdog abandons. The late callback is a FAILURE, so there's nothing to
+    // salvage – it must not disturb the replacement either.
     for (var i = 0; i < IMAGE_TIMEOUT_TICKS; i += 1) { p.tick(); }
     staleCb.onDone(500, null);
     if (p.loadedCount() != 0 || !p.isAwaiting() || f.calls.size() != 2) { return false; }
@@ -203,16 +203,16 @@ function testPipelineSalvageClearsFailedFrame(logger) {
     if (!p.done() || !p.isFrameFailed(0) || p.loadedCount() != 0) { return false; }
 
     // The first attempt's transfer was slow, not dead: its arrival is salvaged
-    // and the frame stops reading as failed -- loaded wins.
+    // and the frame stops reading as failed – loaded wins.
     firstCb.onDone(200, "LATE");
     return p.loadedCount() == 1 && p.isFrameLoaded(0) && !p.isFrameFailed(0);
 }
 
 (:test)
 function testPipelineDoesNotRefetchSalvagedFrame(logger) {
-    // Regression: a watchdog-abandoned frame sits in the retry queue; its slow
+    // Regression: a watchdog-abandoned frame sits in the retry queue. Its slow
     // transfer then completes late and is salvaged (frame shown). The retry
-    // queue entry must NOT trigger a re-fetch of the already-loaded frame --
+    // queue entry must NOT trigger a re-fetch of the already-loaded frame –
     // that kept the loading bar blinking for minutes over BLE.
     var f = new FakeFetcher();
     var p = new FramePipeline(new FakeListener(), f, null);
@@ -239,12 +239,12 @@ function testPipelineReusesCachedFramesOnReopen(logger) {
     var f = new FakeFetcher();
     var p = new FramePipeline(new FakeListener(), f, null);
     p.start(["/t?i=0", "/t?i=1"], "https://proxy", "K");
-    // Complete both fetches; they get cached under their URLs.
+    // Complete both fetches. They get cached under their URLs.
     f.lastCb().onDone(200, "B0");
     f.lastCb().onDone(200, "B1");
     if (f.calls.size() != 2 || p.loadedCount() != 2) { return false; }
 
-    // Reopen: the same frame list. Every frame is served from the cache -- no
+    // Reopen: the same frame list. Every frame is served from the cache – no
     // new fetches are issued, and the pipeline is loaded immediately.
     p.start(["/t?i=0", "/t?i=1"], "https://proxy", "K");
     return f.calls.size() == 2            // still 2: no new makeImageRequests
@@ -260,8 +260,8 @@ function testPipelineEvictsFramesNotInNewList(logger) {
     f.lastCb().onDone(200, "B0");
     f.lastCb().onDone(200, "B1");
 
-    // New list shares only i=1 (i=0 aged out of the window; i=2 is new). i=1 is
-    // reused from cache (no fetch); only i=2 is fetched fresh.
+    // New list shares only i=1 (i=0 aged out of the window, i=2 is new). i=1 is
+    // reused from cache (no fetch). Only i=2 is fetched fresh.
     p.start(["/t?i=1", "/t?i=2"], "https://proxy", "K");
     if (f.calls.size() != 3) { return false; }     // one new fetch, for i=2
     if (!p.isFrameLoaded(0)) { return false; }     // i=1 came from cache
@@ -290,7 +290,7 @@ function testPipelineResetInvalidatesInFlightCallback(logger) {
     if (p.hasFrames() || p.loadedCount() != 0 || f.calls.size() != 1) { return false; }
 
     // And once a NEW frame list has started (new generation), the old
-    // callback's index refers to the old list -- it must NOT be salvaged into
+    // callback's index refers to the old list – it must NOT be salvaged into
     // the new one (wrong zoom / wrong times).
     p.start(["/t?j=0"], "https://proxy", "K");
     staleCb.onDone(200, "CROSS");

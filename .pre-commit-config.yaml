@@ -4,7 +4,7 @@
 #   pre-commit install           # installs the git hook into this clone
 #
 # Thereafter every `git commit` scans the staged changes and aborts the commit on
-# a finding. This is the earliest catch -- for secrets in particular, it stops one
+# a finding. This is the earliest catch – for secrets in particular, it stops one
 # before it ever enters a commit. CI runs the same checks
 # (.github/workflows/secret-scan.yml and lint.yml), so they are enforced even for
 # clones that haven't run `pre-commit install`.

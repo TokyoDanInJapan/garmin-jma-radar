@@ -3,10 +3,10 @@
  * Compositing: reproduce the JMA nowcast viewer's rendering, server-side.
  *
  *   1. For each output pixel, sample the GSI base map underneath it, desaturated
- *      to grayscale + lightened - the washed look the viewer applies so the
+ *      to greyscale + lightened – the washed look the viewer applies so the
  *      coloured radar stands out.
  *   2. Alpha-composite the JMA radar on top at reduced opacity (radar pixels are
- *      fully opaque; dimming lets the map show through).
+ *      fully opaque, and dimming lets the map show through).
  *   3. Optionally stamp a marker dot at the centre.
  *   4. Encode PNG.
  *
@@ -14,14 +14,14 @@
  * 3x3 tile neighbourhood ("dx,dy" -> PNG bytes | null). Rather than build the full
  * 768x768 canvas and crop it (most of which is thrown away), we iterate the
  * `out` x `out` OUTPUT pixels directly and sample the one source pixel each maps
- * to - ~30x fewer pixel ops at out=288, and we desaturate only visible base
+ * to – ~30x fewer pixel ops at out=288, and we desaturate only visible base
  * pixels. Output is identical to the old crop-the-canvas approach.
  *
  * Pure JS (upng-js) so it runs unchanged in the Workers runtime and in Node (the
  * tests render frames directly). No Canvas / WASM needed. scripts/gen-samples.mjs
  * produces equivalent sample images with a separate standalone implementation.
  *
- * Licensing: the radar is JMA's (出典: 気象庁, processed); the base map is GSI's
+ * Licensing: the radar is JMA's (出典: 気象庁, processed). The base map is GSI's
  * (出典: 国土地理院). Both attributions belong in the device UI.
  */
 
@@ -34,9 +34,9 @@ const RADAR_OPACITY = 0.85;
 
 // Posterize the grey GSI base-map ramp to this many levels before compositing.
 // The base map's smooth grey gradient (roads, labels, contours) is the dominant
-// source of PNG entropy; snapping it to a handful of levels cuts the encoded size
-// by ~60% with no meaningful loss (it's a faint, washed-out backdrop) and -- just
-// as importantly -- frees palette slots so the radar's precip colours survive a
+// source of PNG entropy. Snapping it to a handful of levels cuts the encoded size
+// by ~60% with no meaningful loss (it's a faint, washed-out backdrop) and – just
+// as importantly – frees palette slots so the radar's precip colours survive a
 // small CNUM. The radar layer itself is NOT posterized, so its intensity scale
 // stays intact. 6 levels is the sweet spot: flatter banding isn't visible at this
 // size, and 6 greys + the off-grid BG leave ~9 of CNUM's 16 slots for rain.
@@ -46,12 +46,12 @@ const BASE_QSTEP = 255 / (BASE_LEVELS - 1);
 // Palette size for the indexed-PNG encode. The content is the posterized grey
 // base (BASE_LEVELS greys + BG) plus JMA's precip scale, which fits comfortably
 // in 16. Crucially, <=16 colours encode at 4-BIT depth (~0.5 byte/px on device)
-// instead of 8-bit, ~halving the per-frame device memory -- headroom against the
-// 6-frame OOM ceiling -- and roughly halving the bytes Garmin's image service
+// instead of 8-bit, ~halving the per-frame device memory – headroom against the
+// 6-frame OOM ceiling – and roughly halving the bytes Garmin's image service
 // must shuttle over BLE. Without posterizing the base first, 16 colours would
-// crush the radar; with it, the precip blues are preserved (verified on a live
+// crush the radar. With it, the precip blues are preserved (verified on a live
 // rain frame). Do NOT use 0 ("lossless"): anti-aliased radar edges push the frame
-// past 256 distinct colours, making UPNG fall back to truecolour - bigger output,
+// past 256 distinct colours, making UPNG fall back to truecolour – bigger output,
 // heavier encode, blown memory budget. Keeping ps>0 guarantees an indexed PNG.
 const CNUM = 16;
 
@@ -64,7 +64,7 @@ function decodeRGBA(bytes) {
 
 /**
  * Decode a "dx,dy" -> PNG|null neighbourhood into a flat 3x3 array indexed by
- * cell = cy*3 + cx (cx,cy in 0..2; dx=cx-1, dy=cy-1). Missing/404 cells -> null.
+ * cell = cy*3 + cx (cx,cy in 0..2, dx=cx-1, dy=cy-1). Missing/404 cells -> null.
  * Decoding once up front keeps the hot per-pixel loop free of string-key lookups
  * and repeated decodes.
  */
@@ -143,7 +143,7 @@ export async function composite({ baseTiles, radarTiles, centerPx, centerPy, out
         if (ba > 0) {
           const lum = 0.3 * bt.data[si] + 0.59 * bt.data[si + 1] + 0.11 * bt.data[si + 2];
           // Grey (all channels equal), posterized to BASE_LEVELS to shrink the PNG
-          // and keep the palette small. Only the base is snapped; radar stays full.
+          // and keep the palette small. Only the base is snapped. Radar stays full.
           const v = Math.round(Math.round((lum * 0.7 + 255 * 0.3) / BASE_QSTEP) * BASE_QSTEP);
           const inv = 1 - ba;
           r = Math.round(v * ba + r * inv);
@@ -183,7 +183,7 @@ export async function composite({ baseTiles, radarTiles, centerPx, centerPy, out
  * every call, and shaped like a real composited frame (same dimensions, same
  * CNUM-colour indexed encode, and a pattern tuned to land near a real frame's
  * ~12 KB) so a transfer timed against it is representative of a real tile pull
- * -- but, unlike /tile, comparable across runs because the size never varies
+ * – but, unlike /tile, comparable across runs because the size never varies
  * with weather or location.
  * @param {number} out output square size in px (the device tile size)
  * @returns {Uint8Array} PNG bytes

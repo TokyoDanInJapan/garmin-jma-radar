@@ -38,7 +38,7 @@ function testFrameCachePutGetMiss(logger) {
 function testFrameCacheRetainKeepsListedDropsRest(logger) {
     var c = new FrameCache(null);
     c.put("a", "A"); c.put("b", "B"); c.put("c", "C");
-    // "d" isn't cached; "a" isn't in the keep-list.
+    // "d" isn't cached, and "a" isn't in the keep-list.
     var dropped = c.retain(["b", "c", "d"]);
     return dropped == 1 && c.size() == 2
         && c.get("a") == null
@@ -68,7 +68,7 @@ function testFrameCachePersistsAcrossColdStart(logger) {
     var c1 = new FrameCache(s);
     c1.put("a", "A");
     // A fresh cache over the SAME store models a cold start: the in-memory tier
-    // is gone, but the frame is served from -- and re-warmed from -- the store.
+    // is gone, but the frame is served from – and re-warmed from – the store.
     var c2 = new FrameCache(s);
     return c2.get("a").equals("A") && c2.size() == 1;
 }

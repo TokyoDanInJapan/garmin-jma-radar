@@ -103,7 +103,7 @@ else
     else
         warn "SDK Manager not found under ~/Downloads. Download the Linux SDK Manager:"
         warn "  https://developer.garmin.com/connect-iq/sdk/"
-        warn "unzip it under ~/Downloads, then re-run ./setup.sh (or launch it manually:"
+        warn "unzip it under ~/Downloads, then run ./setup.sh again (or launch it manually:"
         warn "  distrobox enter $BOX -- <path>/bin/sdkmanager )."
     fi
 fi

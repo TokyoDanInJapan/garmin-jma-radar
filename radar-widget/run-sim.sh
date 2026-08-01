@@ -6,11 +6,11 @@
 # Locates the installed Connect IQ SDK, builds a single-device .prg (via
 # build.sh, which also bakes in PROXY_BASE/PROXY_KEY from .env), starts the
 # simulator host (connectiq) if it isn't already running, then side-loads the
-# app with monkeydo and streams the device console. If a sim is already up it's
-# reused (a forced restart wedges the SDK's debug port); to reload into an open
-# sim you can also just run build.sh.
+# app with monkeydo and streams the device console. If a simulator is already up it's
+# reused (a forced restart wedges the SDK's debug port). To reload into an open
+# simulator you can also just run build.sh.
 #
-# Run from anywhere; paths are resolved relative to this script.
+# Run from anywhere. Paths are resolved relative to this script.
 #
 # Options:
 #   -d, --device <id>   Target device id (matches a <product> in manifest.xml).
@@ -18,8 +18,8 @@
 #   -k, --key <path>    Developer key (.der/PKCS8). Default: ../developer_key.
 #       --lat <deg>     Simulated GPS latitude.  Default: 35.681236 (Tokyo).
 #       --lon <deg>     Simulated GPS longitude. Default: 139.767125 (Tokyo).
-#                       GPS only applies on a COLD start (the sim rewrites its
-#                       config on exit); if already running, use Simulation >
+#                       GPS only applies on a COLD start (the simulator rewrites its
+#                       config on exit). If already running, use Simulation >
 #                       GPS/Position in the UI.
 #   -e, --env <path>    .env with secrets to bake in. Default: ./.env.
 #   -h, --help          Show this help.
@@ -34,7 +34,7 @@ set -euo pipefail
 # --- Run inside the Connect IQ container, if there is one -------------------
 # The Connect IQ SDK, simulator, and their (older) shared-library dependencies
 # live in the 'garmin' distrobox container, not on the host. When invoked from
-# the host, re-exec this script inside that box. Skip with CIQ_NO_BOX=1; rename
+# the host, re-exec this script inside that box. Skip with CIQ_NO_BOX=1. Rename
 # the target box via CIQ_BOX=<name>.
 CIQ_BOX="${CIQ_BOX:-garmin}"
 if [ -z "${CIQ_NO_BOX:-}" ] && [ ! -e /run/.containerenv ] && [ ! -e /.dockerenv ] \
@@ -53,7 +53,10 @@ lon="139.767125"
 envfile="$here/.env"
 port=1234
 
-usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# Print the header comment block as help. Derived from the file rather than a
+# fixed line range, which silently truncated the examples whenever the header
+# grew: drop the shebang, stop at the first non-comment line, strip the '# '.
+usage() { sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "${BASH_SOURCE[0]}"; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -91,18 +94,18 @@ echo "Device: $device"
 echo "Key:    $key"
 
 # --- Build (delegates to build.sh: SDK + .env injection + restore) ----------
-# CIQ_NO_SIM_UPDATE=1: build.sh auto-loads into an already-open sim, but run-sim
-# launches its own fresh sim and loads below, so suppress build.sh's load here.
+# CIQ_NO_SIM_UPDATE=1: build.sh auto-loads into an already-open simulator, but run-sim
+# launches its own fresh simulator and loads below, so suppress build.sh's load here.
 out="$here/bin/RainRadar.prg"
 echo
 echo "Building..."
 CIQ_NO_SIM_UPDATE=1 "$here/build.sh" -d "$device" -o "$out" -k "$key" -e "$envfile"
 
 # --- Clear the simulator's stored app settings (so baked .env values win) ---
-# The sim persists app settings in a .SET file that OVERRIDES the property
-# defaults compiled into the .prg. A stale entry (e.g. an empty proxyKey) would
-# silently shadow what we just baked in, causing auth failures. Delete it; the
-# sim recreates it from the build's defaults on load.
+# The simulator persists app settings in a .SET file that OVERRIDES the property
+# defaults compiled into the .prg. A stale entry (for example, an empty proxyKey) would
+# silently shadow what we just baked in, causing auth failures. Delete it. The
+# simulator recreates it from the build's defaults on load.
 tmpbase="${TMPDIR:-/tmp}"
 setname="$(basename "$out")"; setname="${setname%.*}"
 setname="$(printf '%s' "$setname" | tr '[:lower:]' '[:upper:]').SET"
@@ -113,20 +116,21 @@ if [[ -f "$setpath" ]]; then
 fi
 
 # --- Launch the simulator (if it isn't already up) --------------------------
-# run-sim.sh's job is to bring the simulator up with the app loaded; build.sh is
-# the one that loads into an already-open sim. If a sim is already running we
+# run-sim.sh's job is to bring the simulator up with the app loaded. The job of
+# build.sh is
+# the one that loads into an already-open simulator. If a simulator is already running we
 # reuse it (load into it below) rather than killing it: a hard kill leaves the
 # Connect IQ host in an "unclean shutdown" state that wedges the debug port on
 # the next launch, so a forced cold-restart is unreliable. To get a truly fresh
-# sim (e.g. to re-apply GPS), close it from its own window first, then run this.
+# simulator (for example, to re-apply GPS), close it from its own window first, then run this.
 sim_running() { pgrep -x simulator >/dev/null 2>&1; }
 sim_was_running=0
 sim_running && sim_was_running=1
 
 # --- Set the simulated GPS position (cold start only) ------------------------
-# The sim stores its last position in simulator.ini as Garmin semicircles
+# The simulator stores its last position in simulator.ini as Garmin semicircles
 # (degrees * 2^31 / 180), read on launch and overwritten on exit, so writing it
-# only sticks when we're the ones starting the sim.
+# only sticks when we're the ones starting the simulator.
 if [[ "$sim_was_running" -eq 0 ]]; then
     sim_ini="$HOME/.Garmin/ConnectIQ/simulator.ini"
     lat_semi="$(awk -v v="$lat" 'BEGIN{printf "%.0f", v*2147483648/180}')"
@@ -157,15 +161,15 @@ fi
 if [[ "$sim_was_running" -eq 0 ]]; then
     echo
     echo "Starting simulator..."
-    ( connectiq >/dev/null 2>&1 & )   # detached; survives this script
+    ( connectiq >/dev/null 2>&1 & )   # detached, so it survives this script
 else
     echo
     echo "Simulator already running; loading the new build into it."
 fi
 
 # --- Wait for the simulator's debug port to be LISTENING --------------------
-# monkeydo attaches over a local TCP port (1234) the sim opens. On a cold start
-# that can take 30-90s -- long after the window appears. Poll the port directly.
+# monkeydo attaches over a local TCP port (1234) the simulator opens. On a cold start
+# that can take 30-90s – long after the window appears. Poll the port directly.
 port_listening() { (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
 echo "Waiting for simulator debug port $port (can take up to ~90s on a cold start)..."
 port_up=0
@@ -182,10 +186,10 @@ if [[ "$port_up" -eq 0 ]]; then
     echo "simulator completely (reboot if needed) and re-run." >&2
     exit 1
 fi
-sleep 2   # the port can flap briefly right after first appearing; let it settle
+sleep 2   # the port can flap right after first appearing, so let it settle
 
 # --- Load the app into the simulator ----------------------------------------
-# A SUCCESSFUL monkeydo does NOT exit -- it stays attached to stream the device
+# A SUCCESSFUL monkeydo does NOT exit – it stays attached to stream the device
 # console. It prints nothing on connect, so success = "still alive after the
 # observation window with no 'Unable to connect'". Failure prints that and exits
 # (can take ~5-6s), so observe a bit longer before trusting an "alive" reading.
@@ -220,11 +224,11 @@ echo "App loaded (monkeydo PID $mdpid)."
 
 echo
 echo "In the simulator set App Settings (Proxy URL + key) and a Japan GPS fix"
-echo "(Simulation > GPS/Position, e.g. lat 35.68 lon 139.76)."
+echo "(Simulation > GPS/Position, for example lat 35.68 lon 139.76)."
 
 # --- Stream the device console to this terminal -----------------------------
 # monkeydo keeps running in the background, appending the device console to
-# $mdlog. Tail it live. Ctrl+C stops the tail; the simulator and app stay loaded.
+# $mdlog. Tail it live. Ctrl+C stops the tail. The simulator and app stay loaded.
 echo
 echo "Streaming device console (Ctrl+C to stop; simulator stays open)..."
 echo "----------------------------------------------------------------------"

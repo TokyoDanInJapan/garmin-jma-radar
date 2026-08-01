@@ -2,9 +2,10 @@ using Toybox.Lang;
 
 // Pure, side-effect-free helpers for the speed-test view: URL normalisation and
 // duration formatting. Kept out of the view so they can be unit-tested without a
-// WatchUi/Communications/Application context (see UtilTest.mc) -- the view is hard
+// WatchUi/Communications/Application context (see UtilTest.mc) – the view is hard
 // to instantiate in a test, these are trivial to call. Mirrors the radar widget's
-// Util/UtilTest split (stripSlash is intentionally the same; each app stays
+// Util/UtilTest split (stripSlash is intentionally the same, because each
+// app stays
 // self-contained rather than sharing a source tree across two separate projects).
 module Util {
 

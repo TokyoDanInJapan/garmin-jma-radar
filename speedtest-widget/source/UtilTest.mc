@@ -3,7 +3,7 @@ using Toybox.Lang;
 
 // Unit tests for the pure helpers in Util. Functions annotated (:test) are only
 // compiled into a unit-test build (monkeyc --unit-test ...) and run in the
-// simulator via `monkeydo <prg> -t`; they are excluded from release builds, so
+// simulator via `monkeydo <prg> -t`. They are excluded from release builds, so
 // they add no on-device size. Each takes a Test.Logger and returns true on pass.
 //
 // Run locally:

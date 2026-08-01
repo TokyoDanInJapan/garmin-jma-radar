@@ -1,7 +1,7 @@
 name = "jma-rain-radar-proxy"
 main = "src/index.js"
 # Pins the Workers runtime semantics. Bump deliberately and redeploy behind the
-# /health smoke test -- it changes runtime behaviour, so it is not a routine
+# /health smoke test – it changes runtime behaviour, so it is not a routine
 # dependency update. This Worker only uses long-stable primitives (fetch, the
 # Cache API, Response, AbortSignal), which is why the jump from 2024-09-01 was
 # safe.
@@ -17,17 +17,17 @@ compatibility_date = "2026-07-01"
 # keeps JMA origin hits and your request count low.
 
 # REQUIRED: shared secret gating /frames and /tile (the worker fails closed
-# without it - see authorize() in index.js). Set it as a secret, not plaintext:
+# without it – see authorize() in index.js). Set it as a secret, not plaintext:
 #   npx wrangler secret put PROXY_TOKEN
 # The Garmin widget must send it as ?key=<token> or an X-Proxy-Key header.
 
 # Per-IP rate limit on /frames and /tile (enforced in index.js via rateLimit()).
 # Works on *.workers.dev with no custom domain. `period` must be 10 or 60.
 # Enforcement is best-effort/eventually-consistent: a concurrent burst can
-# overshoot the limit before it clamps - fine for abuse-blunting behind the token.
+# overshoot the limit before it clamps – fine for abuse-blunting behind the token.
 # NOTE: keep a namespace_id that has only ever been declared via [[ratelimits]].
 # Avoid reusing one first registered under the old [[unsafe.bindings]] form
-# (e.g. "1001"): that path provisions a no-op limiter that never enforces.
+# (for example, "1001"): that path provisions a no-op limiter that never enforces.
 [[ratelimits]]
 name = "RATE_LIMITER"
 namespace_id = "1002"

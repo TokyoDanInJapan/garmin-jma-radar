@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Connect IQ app settings UI. Lets users configure the widget from the Garmin
-  Connect mobile app / Connect IQ store without a rebuild. Each setting binds to
-  a property in properties.xml.
+  Connect IQ app settings UI. It lets users configure the widget from the Garmin
+  Connect mobile app, or from the Connect IQ store, with no rebuild. Each setting
+  binds to a property in properties.xml.
 -->
 <resources>
     <settings>

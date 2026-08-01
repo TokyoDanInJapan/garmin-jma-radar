@@ -1,7 +1,7 @@
 name: lint
 
 # Static checks that apply to the whole repo rather than one subtree, so this
-# runs on every path -- which also makes it safe to mark as a required check
+# runs on every path – which also makes it safe to mark as a required check
 # (see the note in widgets.yml about path-filtered checks deadlocking PRs).
 #
 # All three checks pass cleanly as of the commit that added them, so any finding
@@ -23,8 +23,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The build/deploy/setup scripts do the genuinely error-prone work in this
-      # repo -- sed rewriting of properties.xml, trap-based restore, PID liveness
-      # polling -- and none of it is covered by a test.
+      # repo – sed rewriting of properties.xml, trap-based restore, PID liveness
+      # polling – and none of it is covered by a test.
       # shellcheck is preinstalled on ubuntu-latest.
       - name: shellcheck
         run: |

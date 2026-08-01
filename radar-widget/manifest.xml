@@ -4,7 +4,7 @@
 
   Permissions:
     Communications - HTTP image + JSON requests via the phone (Edge has no cell)
-    Positioning    - GPS to center radar on the rider
+    Positioning    - GPS to centre the radar on the rider
 
   Products: a few representative Edge devices. Add/remove to match your targets.
   Verify the exact product IDs in the Connect IQ SDK device list.

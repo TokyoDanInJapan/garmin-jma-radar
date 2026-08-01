@@ -10,7 +10,7 @@ export const CTX = { waitUntil() {} };
 export const TILE = 256;
 
 // Anchor analysis time = 12:00 UTC. Observed (N1) frames have
-// basetime===validtime; forecast (N2) frames all share basetime = the anchor.
+// basetime===validtime. Forecast (N2) frames all share basetime = the anchor.
 export const ANCHOR = "20260627120000";
 export const OBSERVED = [
   { basetime: "20260627114500", validtime: "20260627114500" }, // -15
@@ -40,7 +40,7 @@ export function stubCaches() {
 
 /**
  * Install a fetch stub: targetTimes URLs get JSON (N1 -> observed, everything
- * else -> forecast); any other URL (tiles) gets TILE_PNG.
+ * else -> forecast). Any other URL (tiles) gets TILE_PNG.
  */
 export function stubFetch(observed = OBSERVED, forecast = FORECAST) {
   globalThis.fetch = async (url) => {

@@ -14,7 +14,7 @@
  *   GET /frames?lat=..&lon=..&z=10&n=6
  *       -> JSON: { frames: [ "/tile?...", ... ], labels, offsets, updated, z, count }
  *   GET /tile?lat=..&lon=..&z=10&basetime=..&validtime=..
- *       -> image/png   (rider-centered, composited, cropped)
+ *       -> image/png   (rider-centred, composited, cropped)
  *   GET /speedtest
  *       -> image/png   (fixed-size synthetic frame for the speed-test widget)
  *
@@ -28,11 +28,11 @@ import { baseTileURL } from "./basemap.js";
 import { lonLatToTileXY } from "./tilemath.js";
 import { composite, speedtestPNG } from "./composite.js";
 
-// px; fills the Edge 1030/1040 width (282px). 8-bit palette ≈ 81KB/frame on
+// px. Fills the Edge 1030/1040 width (282px). 8-bit palette ≈ 81KB/frame on
 // device. A cross-project contract: must match DEVICE_TILE_SIZE in both widgets
 // (radar-widget RadarView.mc, speedtest-widget SpeedTestView.mc).
 const DEVICE_TILE_SIZE = 288;
-const TILE = 256; // slippy tile size; matches tilemath.js / composite.js
+const TILE = 256; // slippy tile size, matching tilemath.js / composite.js
 
 // Scope is Japan only (README): reject coordinates outside a generous box around
 // the JMA nowcast coverage. Bounding requests here caps the cache/key space an
@@ -73,7 +73,7 @@ function timingSafeEqual(a, b) {
 /**
  * Per-IP rate limit on the compute-heavy endpoints (Workers Rate Limiting
  * binding, configured in wrangler.toml). A leaked token could otherwise drive
- * cache-busting load; this caps it. No-op when the binding is absent (e.g. local
+ * cache-busting load. This caps it. No-op when the binding is absent (for example, local
  * `wrangler dev` without it), so dev/tests don't depend on the beta binding.
  */
 async function rateLimit(request, env) {
@@ -119,7 +119,7 @@ export default {
       }
     } catch (err) {
       // Client errors carry a safe, intentional message. Everything else may
-      // embed upstream URLs/status - log it server-side, return a generic body.
+      // embed upstream URLs/status – log it server-side, return a generic body.
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
       console.error("upstream/render error:", err instanceof Error ? err.stack : err);
       return json({ error: "upstream error" }, 502);
@@ -138,7 +138,7 @@ async function handleFrames(url, env, ctx) {
   // -15..+60 min window in 15-min steps (assembled in jma.js). `n` is the
   // device's frameCount setting: it caps how many frames we return, selected by
   // jma.js's priority order (now, +60, +30, ...) and played oldest-first.
-  // Defaults to the full set; jma.js clamps it to the memory-safe maximum.
+  // Defaults to the full set. jma.js clamps it to the memory-safe maximum.
   const n = int(url, "n", 6);
   const recent = await getFrameTimes(env, ctx, n); // [{basetime, validtime, offset}, ...]
 
@@ -158,8 +158,8 @@ async function handleFrames(url, env, ctx) {
   });
   // Per-frame JST "HH:MM" labels (absolute valid time) plus the fixed grid
   // offset in minutes from the analysis time (-15..+60). The device shows
-  // "<label> <offset>" so the offset is stable and TZ-independent - no device
-  // clock math. JMA validtimes are UTC; riders are in Japan, so labels are JST.
+  // "<label> <offset>" so the offset is stable and TZ-independent – no device
+  // clock math. JMA validtimes are UTC. Riders are in Japan, so labels are JST.
   const labels = recent.map((t) => jstLabel(t.validtime));
   const offsets = recent.map((t) => t.offset);
 
@@ -172,7 +172,7 @@ async function handleFrames(url, env, ctx) {
 }
 
 /**
- * Produce a single rider-centered PNG frame. Heavily cached (immutable per
+ * Produce a single rider-centred PNG frame. Heavily cached (immutable per
  * basetime/validtime/lat/lon/z) so JMA is hit at most once per unique frame.
  */
 async function handleTile(url, env, ctx) {
@@ -180,7 +180,7 @@ async function handleTile(url, env, ctx) {
   const basetime = timestamp(url, "basetime");
   const validtime = timestamp(url, "validtime");
 
-  // Which tile contains the rider, and where inside it they sit (for centering).
+  // Which tile contains the rider, and where inside it they sit (for centring).
   const { x, y, px, py } = lonLatToTileXY(lon, lat, z);
 
   // Cache on the canonical (integer) tile geometry, NOT the raw lat/lon floats.
@@ -193,11 +193,11 @@ async function handleTile(url, env, ctx) {
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
 
-  // The rider-centered window may straddle tile boundaries, so we fetch the
+  // The rider-centred window may straddle tile boundaries, so we fetch the
   // base-map and radar tiles it overlaps. A 288px window over 256px tiles touches
   // at most 3 columns/rows but usually only 2 (4 tiles), so compute the exact
-  // overlap and skip the rest - fewer JMA/GSI fetches and fewer PNG decodes than
-  // the old fixed 3x3. Base tiles rarely change (cache hard); radar frames are
+  // overlap and skip the rest – fewer JMA/GSI fetches and fewer PNG decodes than
+  // the old fixed 3x3. Base tiles rarely change (cache hard). Radar frames are
   // per-validtime (shorter TTL).
   const dxs = windowTileOffsets(px, DEVICE_TILE_SIZE);
   const dys = windowTileOffsets(py, DEVICE_TILE_SIZE);
@@ -255,7 +255,7 @@ function handleSpeedTest() {
 /**
  * Which tile offsets (-1/0/1) a centred `out`-px window overlaps on one axis.
  * `center` is the rider's pixel within the centre tile (0..255). The window's
- * top-left in 3x3-grid coords is TILE+center-floor(out/2); a tile column/row c
+ * top-left in 3x3-grid coords is TILE+center-floor(out/2). A tile column/row c
  * (c in 0..2, offset c-1) is included iff the window intersects [c*TILE,
  * (c+1)*TILE). composite.js reads exactly these cells, so the dropped ones can't
  * affect the output.
@@ -272,7 +272,7 @@ function windowTileOffsets(center, out) {
   return offs;
 }
 
-/** Fetch the requested tile offsets; out["dx,dy"] = PNG bytes | null. */
+/** Fetch the requested tile offsets. out["dx,dy"] = PNG bytes | null. */
 async function fetchNeighbourhood({ x, y, dxs, dys, urlFor, cacheTtl }) {
   const jobs = [];
   const out = {};
@@ -301,10 +301,10 @@ async function fetchTilePNG(u, cacheTtl = 300) {
   try {
     r = await fetch(u, {
       cf: { cacheTtl, cacheEverything: true },
-      signal: AbortSignal.timeout(5000), // bound a stalled tile; one slow tile != a hung frame
+      signal: AbortSignal.timeout(5000), // bound a stalled tile, so one slow tile != a hung frame
     });
   } catch {
-    // Network error or timeout (AbortError) - degrade gracefully rather than
+    // Network error or timeout (AbortError) – degrade gracefully rather than
     // blanking the whole frame. The compositor renders a null tile as background.
     return null;
   }
@@ -385,7 +385,7 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 /**
- * Round to 4 decimal places (~11 m of lat/lon; sub-pixel at every supported
+ * Round to 4 decimal places (~11 m of lat/lon, sub-pixel at every supported
  * zoom) so jittery fixes collapse onto one /tile URL and cache entry.
  * @param {number} v
  * @returns {number}

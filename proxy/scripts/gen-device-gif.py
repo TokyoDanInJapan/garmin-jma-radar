@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Assemble the sample radar frames into an animated GIF on a mock Edge screen.
 
-PROTOTYPE -- this is NOT what the widget renders. It approximates an early
+PROTOTYPE – this is NOT what the widget renders. It approximates an early
 design and has since diverged from radar-widget/source/RadarView.mc
 drawRadarScreen(); do not use its output to show what the app looks like.
 Known differences:

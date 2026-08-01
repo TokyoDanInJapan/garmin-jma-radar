@@ -25,7 +25,7 @@ const FORECAST_URL = `${JMA_BASE}/targetTimes_N2.json`;
 // Presentation window: 15 min of observed past through 60 min of forecast,
 // sampled every 15 min. All offsets land on JMA's native 5-min grid, so each
 // maps to a real frame. Note +35..+60 min forecast is 1 km resolution (coarser)
-// vs 250 m for the rest - JMA's own limitation.
+// vs 250 m for the rest – JMA's own limitation.
 //
 // FRAME_PRIORITY_MIN orders the offsets by *importance*, not by time. When the
 // caller asks for fewer than the full set (the device's `frameCount` setting),
@@ -38,14 +38,14 @@ const FRAME_PRIORITY_MIN = [0, 60, 30, 45, 15, -15];
 const MAX_FRAMES = FRAME_PRIORITY_MIN.length; // 6 - device memory ceiling
 
 /**
- * Fetch one targetTimes file and normalize to [{basetime, validtime}].
- * `observedOnly` keeps analysis frames (basetime===validtime); otherwise keeps
+ * Fetch one targetTimes file and normalise to [{basetime, validtime}].
+ * `observedOnly` keeps analysis frames (basetime===validtime). Otherwise keeps
  * forecast frames (validtime>basetime). Edge-cached ~60s so we don't refetch
  * per device.
  */
 async function fetchTimes(url, ctx, observedOnly) {
   const cache = caches.default;
-  // Cache the *normalized* list under a synthetic key (same radar.invalid
+  // Cache the *normalised* list under a synthetic key (same radar.invalid
   // pattern as handleTile's). A fragment ("url#cache") is not a safe
   // discriminator: the Cache API may strip it, which would collide this entry
   // with the raw upstream response cached by cf.cacheEverything.
@@ -59,7 +59,7 @@ async function fetchTimes(url, ctx, observedOnly) {
   });
   if (!r.ok) throw new Error(`targetTimes ${r.status}`);
   const raw = await r.json();
-  // JMA occasionally serves an error object/HTML instead of the array; guard so
+  // JMA occasionally serves an error object/HTML instead of the array. Guard so
   // a malformed upstream body surfaces as a clean error, not a TypeError.
   if (!Array.isArray(raw)) throw new Error("targetTimes: unexpected shape");
 
@@ -68,7 +68,7 @@ async function fetchTimes(url, ctx, observedOnly) {
       && (observedOnly ? t.basetime === t.validtime : t.validtime > t.basetime))
     .map((t) => ({ basetime: t.basetime, validtime: t.validtime }));
 
-  // Some responses are newest-first; ensure oldest-first for playback.
+  // Some responses are newest-first. Sort oldest-first for playback.
   normalized.sort((a, b) => (a.validtime < b.validtime ? -1 : 1));
 
   const resp = new Response(JSON.stringify(normalized), {
@@ -80,7 +80,7 @@ async function fetchTimes(url, ctx, observedOnly) {
 
 /**
  * Assemble the -15 .. +60 min frame set (15-min steps). Past/now frames come
- * from observed (N1), forecast frames from N2; the two share an anchor because
+ * from observed (N1), forecast frames from N2. The two share an anchor because
  * N2's basetime is the latest analysis time (= newest observed frame). `count`
  * caps how many frames to return, chosen by FRAME_PRIORITY_MIN (now first, then
  * +60, ...) and clamped to [1, MAX_FRAMES]. Returns ordered
@@ -89,7 +89,7 @@ async function fetchTimes(url, ctx, observedOnly) {
  * frame for.
  */
 export async function getFrameTimes(env, ctx, count = MAX_FRAMES) {
-  // Enforce the device memory ceiling regardless of what the client asks for; a
+  // Enforce the device memory ceiling regardless of what the client asks for. A
   // 0/NaN/negative count falls back to the full set.
   const want = Math.min(MAX_FRAMES, Math.max(1, Math.floor(count) || MAX_FRAMES));
   // The `want` highest-priority offsets, played back oldest-first.
@@ -115,7 +115,7 @@ export async function getFrameTimes(env, ctx, count = MAX_FRAMES) {
   const out = [];
   for (const off of offsets) {
     const target = formatJmaTime(anchorMs + off * 60000);
-    // <=0 is observed/analysis (basetime===validtime); >0 is forecast.
+    // <=0 is observed/analysis (basetime===validtime), and >0 is forecast.
     const t = off > 0 ? fcByValid.get(target) : obsByValid.get(target);
     if (t) out.push({ basetime: t.basetime, validtime: t.validtime, offset: off });
   }
