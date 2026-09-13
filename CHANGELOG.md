@@ -8,6 +8,15 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ## Unreleased
 
+### Changed
+
+- The README and the guides in `docs/` now use plain British English. Sentences
+  are shorter, the steps are in lists, and the text defines terms such as JMA and
+  GSI on first use. Some README anchors changed, for example
+  `#2-build-and-run-the-widget` and `#wi-fi-and-bluetooth`.
+- The troubleshooting entry for blank frames no longer blames a zoom above
+  `z=11`. The Worker limits the zoom to 4–11, so a request cannot go past `z=11`.
+
 ### Fixed
 
 - **The release workflow built every package and then published nothing.** The

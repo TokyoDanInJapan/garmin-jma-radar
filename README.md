@@ -1,32 +1,34 @@
 # JMA Rain Radar
 
-Animated, rider-centred rain radar for Garmin Edge devices. It uses JMA's
-high-resolution precipitation nowcast (高解像度降水ナウキャスト). **Japan only.**
+An animated rain radar for Garmin Edge bike computers, centred on the rider. It
+uses the high-resolution precipitation nowcast (高解像度降水ナウキャスト) from the
+Japan Meteorological Agency (JMA). **It works in Japan only.**
 
 The project has three parts:
 
-- **`proxy/`** – a Cloudflare Worker. It reads JMA's radar times, composites JMA
-  and GSI tiles into one rider-centred PNG per frame, caches the frames and
-  serves them to the device.
-- **`radar-widget/`** – the Connect IQ widget (Monkey C). It takes a GPS fix,
-  asks the proxy for frames and animates them on screen.
-- **`speedtest-widget/`** – a small diagnostic Connect IQ widget. It times the
-  proxy's `/frames` (`makeWebRequest`) against the fixed-size `/speedtest` asset
-  (`makeImageRequest`), so you can compare the Wi-Fi and Bluetooth transport
-  paths (see [Connectivity](#connectivity-wi-fi-vs-bluetooth)). It installs
-  alongside the radar.
+- **`proxy/`** is a Cloudflare Worker. It reads the radar times from JMA and
+  combines JMA radar tiles with map tiles from the Geospatial Information
+  Authority of Japan (GSI). For each frame, it makes one PNG image centred on the
+  rider. It caches the frames and serves them to the device.
+- **`radar-widget/`** is the Connect IQ widget, written in Monkey C. It gets a
+  GPS fix, asks the proxy for frames and animates them on the screen.
+- **`speedtest-widget/`** is a small Connect IQ widget for diagnostics. It times
+  the proxy's `/frames` list (through `makeWebRequest`) against the fixed-size
+  `/speedtest` image (through `makeImageRequest`). Use it to compare the Wi-Fi
+  and Bluetooth paths (see [Wi-Fi and Bluetooth](#wi-fi-and-bluetooth)). It
+  installs alongside the radar widget.
 
 ```
 garmin-jma-radar/
 ├── setup.sh               # one-time toolchain setup (distrobox container + SDK + key)
-├── docs/                  # SDK install, troubleshooting, demo media
+├── docs/                  # SDK install, troubleshooting
 ├── proxy/                 # Cloudflare Worker (Node / wrangler)
 │   ├── src/
 │   │   ├── index.js       #   routes: /frames (list), /tile (PNG), /speedtest, /health
 │   │   ├── jma.js         #   JMA endpoint logic
 │   │   ├── tilemath.js    #   lon/lat -> z/x/y + pixel offset
-│   │   ├── basemap.js     #   GSI base-map tile URLs
-│   │   └── composite.js   #   composite 3x3 neighbourhood -> rider-centred PNG
+│   │   ├── basemap.js     #   GSI base map tile URLs
+│   │   └── composite.js   #   combine a 3x3 block of tiles -> rider-centred PNG
 │   └── wrangler.toml
 ├── radar-widget/          # Connect IQ widget (Monkey C)
 │   ├── manifest.xml       # app id, products, permissions
@@ -38,85 +40,90 @@ garmin-jma-radar/
 │   ├── source/            # RainRadarApp / RadarView / RadarDelegate / Util(+Test)
 │   └── resources/         # all app resources
 │       ├── shared/        # strings, properties, settings (every device)
-│       ├── edge1030plus/  # per-device launcher icon (36x36)
-│       └── edge1040/      # per-device launcher icon (40x40)
-└── speedtest-widget/      # diagnostic widget (build/run-sim/deploy/remove like the
-                           #   radar. Reuses radar-widget/.env for the URL + key)
+│       ├── edge1030plus/  # launcher icon for this device (36x36)
+│       └── edge1040/      # launcher icon for this device (40x40)
+└── speedtest-widget/      # diagnostic widget (same scripts as the radar widget.
+                           #   Uses radar-widget/.env for the URL and key)
 ```
 
 ## How it works
 
-1. The widget gets a one-shot GPS fix.
+1. The widget gets a single GPS fix.
 2. It calls `GET /frames?lat&lon&z` on the proxy.
-3. The proxy reads JMA `targetTimes_N1.json` (observed) and `targetTimes_N2.json`
-   (forecast). It returns a **−15…+60 min** window as ordered `/tile?...` URLs:
-   up to six frames, in 15-minute steps. Each URL carries its JST valid-time
-   `label` and its minutes-from-now `offset`. `frameCount` (1–6) is the Wi-Fi
-   maximum. Over Bluetooth the widget throttles to three frames (see
-   [Connectivity](#connectivity-wi-fi-vs-bluetooth)).
-4. The widget requests each tile as a `makeImageRequest`. The proxy composites a
-   rider-centred PNG of 16 colours or fewer (4-bit), a 3×3 tile crop on a GSI
-   base map, and caches it immutably.
-5. The widget animates the frames on a timer and labels each frame with its valid
-   time, for example `21:45 now` or `22:00 +15m`. The on-screen **Wide** and
-   **Local** buttons switch the zoom preset.
+3. The proxy reads the JMA observed times (`targetTimes_N1.json`) and forecast
+   times (`targetTimes_N2.json`). It returns up to six `/tile?...` URLs in order,
+   one for each 15-minute step from **−15 min to +60 min**. Each URL carries its
+   valid time in JST (`label`) and its minutes from now (`offset`).
+4. The widget requests each tile with `makeImageRequest`. The proxy combines a
+   3×3 block of tiles on a GSI base map into one rider-centred PNG. The PNG has
+   16 colours or fewer (4-bit). The proxy caches each PNG as immutable, because
+   the image for a given valid time never changes.
+5. The widget animates the frames on a timer. It labels each frame with its valid
+   time, for example `21:45 now` or `22:00 +15m`. The **Wide** and **Local**
+   buttons on the screen change the zoom preset.
 
-Device traffic goes over **Wi-Fi when a network is connected, and otherwise
-through the phone over Bluetooth**. The Edge has no cellular radio, so at run
-time you need a paired phone running Garmin Connect, or a known Wi-Fi network,
-with internet access. The loading screen shows which path is in use, for example
+`frameCount` (1–6) sets the maximum number of frames on Wi-Fi. Over Bluetooth,
+the widget loads three frames at most (see
+[Wi-Fi and Bluetooth](#wi-fi-and-bluetooth)).
+
+The device uses **Wi-Fi when it is connected to a network. Otherwise, it goes
+through the phone over Bluetooth**. The Edge has no cellular radio. At run time,
+it needs internet access through a known Wi-Fi network or a paired phone that
+runs Garmin Connect. The loading screen shows which path is in use, for example
 `Loading radar (Wi-Fi)...`.
 
-### Connectivity (Wi-Fi vs Bluetooth)
+### Wi-Fi and Bluetooth
 
-The two paths behave very differently for the image tiles:
+The two paths give very different speeds for image tiles:
 
-- The phone fetches **`/frames`** (JSON, `makeWebRequest`) directly. This is
-  quick on either path.
-- **`/tile`** (PNG, `makeImageRequest`) is **not** transferred directly. Garmin
-  relays it through its image service. On **Wi-Fi** the relay is fast, under a
-  second per tile. Over **Bluetooth** it is slow and unreliable: about 20–30 s
-  per tile, the documented `BLE_HOST_TIMEOUT` behaviour. A full set can
-  therefore take minutes.
+- **`/frames`** (JSON, through `makeWebRequest`) goes directly to the proxy. It
+  is fast on both paths.
+- **`/tile`** (PNG, through `makeImageRequest`) goes through Garmin's image
+  service, which relays each image. On **Wi-Fi**, the relay is fast, at under one
+  second for each tile. Over **Bluetooth**, it is slow and unreliable, at about
+  20–30 s for each tile. This matches the documented `BLE_HOST_TIMEOUT`
+  behaviour. A full set of frames can take minutes.
 
-Because of that, the widget adapts. On Wi-Fi it loads the full `frameCount`.
-Over Bluetooth it throttles to **three frames** (`BLE_FRAME_CAP`), so the
-animation appears in reasonable time.
+The widget adapts to the path. On Wi-Fi, it loads the full `frameCount`. Over
+Bluetooth, it loads three frames at most (`BLE_FRAME_CAP`), so that the animation
+appears in a reasonable time.
 
-To watch the latency of the two paths live, run the **`speedtest-widget/`** app.
-Its image phase pulls the proxy's `/speedtest` asset, a deterministic PNG shaped
-like a real frame (about 12 KB, byte-identical on every request), so timings are
-comparable across runs and locations. To load a full set quickly, prefer Wi-Fi.
-Bluetooth is best for a quick 'is rain near me' check.
+To see the delay on each path live, run the **`speedtest-widget/`** app. Its
+image test downloads the proxy's `/speedtest` image. This image is a fixed PNG
+the same size as a real frame (about 12 KB). The proxy returns the same bytes on
+every request, so you can compare timings across runs and places.
+
+Use Wi-Fi to load a full set of frames quickly. Bluetooth is good enough for a
+quick check of whether rain is near you.
 
 ---
 
 # Setup
 
-Do this once, in order:
+Do these steps once, in this order:
 
 1. **[Deploy the proxy](#1-deploy-the-proxy)** to Cloudflare.
-2. **[Build and run the widget](#2-build--run-the-widget)**, then point it at
+2. **[Build and run the widget](#2-build-and-run-the-widget)**, then give it
    your proxy URL.
-3. *(optional)* Set up
-   **[continuous integration and deployment](#3-continuous-integration--deployment)**
+3. Optionally, set up
+   **[continuous integration and deployment](#3-continuous-integration-and-deployment)**
    for the proxy.
 
 ## 1. Deploy the proxy
 
-**Prerequisites:** Node 22 or newer (wrangler v4 needs it) and a free Cloudflare
+**You need** Node 22 or newer (wrangler v4 needs it) and a free Cloudflare
 account.
 
 ```bash
 cd proxy
 npm install                 # wrangler, upng-js
-npm test                    # optional: unit tests (should be all green)
+npm test                    # optional: run the unit tests (all must pass)
 npx wrangler login          # opens a browser to authorise Cloudflare
 ```
 
-**Set the auth token.** The proxy fails closed: without `PROXY_TOKEN` it returns
-`401` for every request. Generate a random token and store it as a Worker secret.
-Never commit the token.
+**Set the auth token.** If `PROXY_TOKEN` is not set, the proxy returns `401` for
+every request. Generate a random token and store it as a Worker secret. Never
+commit the token.
 
 ```bash
 openssl rand -hex 16                 # generate a token, then copy it
@@ -131,13 +138,13 @@ npx wrangler deploy
 # https://jma-rain-radar-proxy.<subdomain>.workers.dev
 ```
 
-Note that URL. You paste it into the widget settings later.
+Keep a copy of that URL. You need it for the widget settings later.
 
 <details>
 <summary><strong>Run the proxy locally (optional)</strong></summary>
 
-Worker secrets are not available to `wrangler dev`, so put the same token in
-`proxy/.dev.vars` (git-ignored):
+`wrangler dev` cannot read Worker secrets. Put the same token in
+`proxy/.dev.vars`, which git ignores:
 
 ```bash
 echo "PROXY_TOKEN=<your-token>" > .dev.vars
@@ -150,47 +157,50 @@ curl "http://localhost:8787/health"  # -> {"ok":true,"rateLimiter":false} (no to
 <details>
 <summary><strong>Rate limiting (recommended)</strong></summary>
 
-`/tile` is cheap to call but expensive to serve, so cap the request rate.
+`/tile` is cheap to call but expensive to serve, so limit the request rate.
 
-**This repo already ships per-IP rate limiting** (60 requests per 60 s) through
-the `RATE_LIMITER` binding in `wrangler.toml`, enforced in `src/index.js`. The
-limiter activates on `npx wrangler deploy`. Tune `limit` and `period` to taste.
-The limiter does nothing when the binding is absent, so `wrangler dev` works
-without it.
+**This repo already limits requests for each IP address** to 60 requests in
+60 s. The `RATE_LIMITER` binding in `wrangler.toml` sets the limit, and
+`src/index.js` applies it. The limiter starts to work when you run
+`npx wrangler deploy`. Change `limit` and `period` to suit your needs. When the
+binding is absent, the limiter does nothing, so `wrangler dev` works without it.
 
 ```toml
 # wrangler.toml
 [[ratelimits]]
 name = "RATE_LIMITER"
-namespace_id = "1002"                 # a fresh id (see gotcha below)
+namespace_id = "1002"                 # a new id (see the notes below)
 simple = { limit = 60, period = 60 } # period must be 10 or 60
 ```
 
-Two gotchas:
-- **Use a fresh `namespace_id`.** A namespace first registered under the older
-  `[[unsafe.bindings]]` form deploys as a *no-op* limiter that never enforces.
-- **Enforcement is eventually consistent.** Verify with *sequential* requests
-  (`curl '…&cb=[1-120]'` → about 60 × `200`, then `429`). A concurrent burst
-  races the counter and mostly slips through. That is expected.
+Two points need care:
 
-If the Worker runs on a custom domain, you can instead add a Cloudflare dashboard
-**WAF → Rate limiting** rule on `URI Path contains /tile`. That needs no code
-change.
+- **Use a new `namespace_id`.** If a namespace was first registered in the older
+  `[[unsafe.bindings]]` form, it deploys as a limiter that never blocks a
+  request.
+- **The counter is eventually consistent**, so it can fall behind the requests.
+  Test with requests *in sequence*. `curl '…&cb=[1-120]'` gives about 60 ×
+  `200`, then `429`. Most of a concurrent burst gets through before the counter
+  catches up. This is expected.
+
+If the Worker runs on a custom domain, you can use a rule in the Cloudflare
+dashboard instead. Add a **WAF → Rate limiting** rule on
+`URI Path contains /tile`. This needs no change to the code.
 </details>
 
-## 2. Build & run the widget
+## 2. Build and run the widget
 
 ### Install the Connect IQ SDK
 
 On Ubuntu 24.10 or newer, run this from the repo root:
 
 ```bash
-./setup.sh      # idempotent: container + SDK + simulator libs + signing key
+./setup.sh      # safe to run again: container + SDK + simulator libs + signing key
 ```
 
-**[docs/connect-iq-sdk.md](docs/connect-iq-sdk.md)** covers VS Code and
-plain-Ubuntu installs. It also shows how to create the developer signing key by
-hand.
+**[docs/connect-iq-sdk.md](docs/connect-iq-sdk.md)** covers installs with
+VS Code and on Ubuntu 22.04 or 24.04. It also shows how to create the developer
+signing key by hand.
 
 ### Run in the simulator
 
@@ -199,35 +209,42 @@ cd radar-widget
 ./run-sim.sh                 # -d <device>, --lat/--lon to override
 ```
 
-`run-sim.sh` **brings the simulator up** with the app loaded. It starts the
-simulator if the simulator is not already running, injects a GPS fix (Tokyo by
-default, override with `--lat` and `--lon`), side-loads the `.prg` and streams
-the device console. The default device is `edge1030plus`. Use `-d <device>` to
-change it.
+`run-sim.sh` **starts the simulator with the app loaded**. The script does these
+steps:
 
-If a simulator is already open, `run-sim.sh` reuses it. To get a fresh one, close
-the simulator from its own window first. A forced restart wedges the SDK's debug
-port. Then, in the simulator:
+- starts the simulator, if it is not already running
+- sets a GPS fix (Tokyo by default, or use `--lat` and `--lon`)
+- copies the `.prg` into the simulator (a sideload)
+- streams the device console
 
-1. **Settings → App Settings** → set **Proxy URL** (your `…workers.dev` URL) and
-   **Proxy key** (your `PROXY_TOKEN`). *(Or bake both values into the build with
-   `radar-widget/.env`. See [Settings](#settings).)*
+The default device is `edge1030plus`. To use a different device, add
+`-d <device>`.
 
-The widget acquires the fix, fetches frames and animates. To move the position
-after launch, use **Simulation → GPS/Position** in the simulator UI.
+If a simulator is already open, `run-sim.sh` uses it. To start with a new
+simulator, close the open one from its own window. Do not force the simulator to
+close, because a forced close blocks the SDK's debug port.
 
-**Fast inner loop: reload into the open simulator.** Once a simulator is running,
-a plain `build.sh` loads the new build straight into it, with no restart. The
-usual edit/run cycle is `run-sim.sh` once, then `build.sh` after each change:
+When the simulator runs, go to **Settings → App Settings**. Set **Proxy URL** to
+your `…workers.dev` URL, and set **Proxy key** to your `PROXY_TOKEN`. You can
+also bake both values into the build with `radar-widget/.env` (see
+[Settings](#settings)).
+
+The widget then gets a GPS fix, fetches the frames and animates them. To move the
+position after launch, use **Simulation → GPS/Position** in the simulator.
+
+**Load new builds into the open simulator.** When a simulator is running,
+`build.sh` loads each new build straight into it, with no restart. For the usual
+cycle of edit and run, run `run-sim.sh` once. Then run `build.sh` after each
+change:
 
 ```bash
 ./build.sh -d edge1030plus   # builds, then loads into the running simulator
 ```
 
-If no simulator is open, `build.sh` only builds. To suppress the auto-load, set
+If no simulator is open, `build.sh` only builds. To stop the automatic load, set
 `CIQ_NO_SIM_UPDATE=1`.
 
-> VS Code users can instead press **F5** and pick a device.
+> In VS Code, you can press **F5** and select a device instead.
 
 ### Build a deployable package
 
@@ -239,78 +256,89 @@ cd radar-widget
 ```
 
 `RainRadar.iq` contains release builds for every product in `manifest.xml`.
-Upload that file to the Connect IQ Store. It is the CLI equivalent of *Monkey C:
-Export Project*.
+Upload this file to the Connect IQ Store. `./build.sh` with no options does the
+same as *Monkey C: Export Project* in VS Code.
 
 If a simulator is open when you build, `build.sh` also loads the result into it
-(see [Run in the simulator](#run-in-the-simulator)). For a store `.iq`,
-`build.sh` compiles a single-device `.prg` for the simulator's current device to
-load. Set `CIQ_NO_SIM_UPDATE=1` to skip this.
+(see [Run in the simulator](#run-in-the-simulator)). For a Store `.iq` build,
+`build.sh` also compiles a `.prg` for the device that the simulator shows, and
+loads that `.prg`. To skip this step, set `CIQ_NO_SIM_UPDATE=1`.
 
 ### Run on a real device
 
-Put a dev build on your own Edge with **`deploy-device.sh`**. The script bakes
-your `radar-widget/.env` secrets into the build and copies the build over USB:
+To put a development build on your own Edge, use **`deploy-device.sh`**. First,
+fill in `PROXY_BASE` and `PROXY_KEY` in `radar-widget/.env`. Then run the
+script:
 
 ```bash
-cd radar-widget                    # fill in radar-widget/.env first (PROXY_BASE, PROXY_KEY)
+cd radar-widget
 ./deploy-device.sh           # build edge1030plus, copy to the mounted Edge, eject
 ```
 
-The script does five things:
+The script does these steps:
 
-- finds the USB-mounted Edge
-- builds the widget with `.env` baked in
+- finds the Edge that is mounted over USB
+- builds the widget with the `.env` values baked in
 - copies the `.prg` into `Garmin/Apps/`
-- clears any stale on-device settings, so the baked values win
+- deletes old settings on the device, so that the baked-in values apply
 - ejects the device
 
-Use `-d <device>` for another Edge, `--dest <dir>` to point at the Apps folder,
-or `--no-eject` to leave the device mounted. The script is Linux-only, because it
-uses `udisksctl`. On other platforms, build a `.prg` with
-`./build.sh -d <device>`, with `radar-widget/.env` filled in so the config is
-baked in, then copy the file into `Garmin/Apps/` yourself.
+The script has these options:
 
-Then unplug the device and open **Rain Radar JP** from the **widget loop**: swipe
-down from the home screen, then left or right. Rain Radar JP is a *widget*, so it
-does not appear in the device's Connect IQ Apps menu. It acquires a GPS fix,
-fetches frames and animates.
+- `-d <device>` builds for a different Edge model.
+- `--dest <dir>` sets the path to the Apps folder.
+- `--no-eject` leaves the device mounted.
 
-**On-device controls:** the on-screen **Wide** (about 140 km) and **Local**
-(about 36 km) buttons switch the zoom preset. A tap elsewhere does nothing, so a
-stray touch cannot flip the zoom. After a failure, a tap acts as **Retry**.
-**Back** exits.
+The script works on Linux only, because it uses `udisksctl`. On other platforms,
+fill in `radar-widget/.env` and build a `.prg` with `./build.sh -d <device>`.
+Then copy the file into `Garmin/Apps/` yourself.
+
+Unplug the device. Open **Rain Radar JP** from the **widget loop**. To get
+there, swipe down from the home screen, then swipe left or right. Rain Radar JP
+is a *widget*, so it is not in the Connect IQ Apps menu on the device. The widget
+gets a GPS fix, fetches the frames and animates them.
+
+**Controls on the device:**
+
+- **Wide** (about 140 km) and **Local** (about 36 km) change the zoom preset.
+- A tap anywhere else does nothing, so an accidental touch cannot change the
+  zoom.
+- After a failure, tap the screen to try again.
+- **Back** closes the widget.
 
 ### Settings
 
-The widget reads these app settings at run time. Set them in the simulator's App
-Settings, through Garmin Connect (Connect IQ **Store** installs only, see below),
-or bake them into a build with `radar-widget/.env`:
+The widget reads these settings at run time. You can set them in three ways:
+
+- in the simulator, under **App Settings**
+- in Garmin Connect, for Store installs only (see below)
+- in a build, baked in from `radar-widget/.env`
 
 | Setting | Required | Notes |
 | --- | --- | --- |
-| **Proxy URL** (`proxyBase`) | yes | your `…workers.dev` URL, no trailing slash |
-| **Proxy key** (`proxyKey`) | yes | the Worker's `PROXY_TOKEN`, an `openssl rand -hex 16` value. **Not** a Cloudflare API token |
-| **Zoom** (`zoom`) | no | 4 (widest) to 11 (street). Default 8, which is the **Local** preset. The **Wide** button selects 6 |
-| **Frame count** (`frameCount`) | no | 1 to 6. This is the **Wi-Fi maximum**. Over Bluetooth the widget throttles to three frames |
+| **Proxy URL** (`proxyBase`) | yes | Your `…workers.dev` URL, with no slash at the end. |
+| **Proxy key** (`proxyKey`) | yes | The Worker's `PROXY_TOKEN` (the `openssl rand -hex 16` value). This is not your Cloudflare API token. |
+| **Zoom** (`zoom`) | no | From 4 (widest) to 11 (street level). The default is 8, which is the **Local** preset. **Wide** selects 6. |
+| **Frame count** (`frameCount`) | no | From 1 to 6. This is the maximum on Wi-Fi. Over Bluetooth, the widget loads three frames at most. |
 
-`radar-widget/.env` (git-ignored) holds `PROXY_BASE` and `PROXY_KEY`. `build.sh`,
-`run-sim.sh` and `deploy-device.sh` bake those values into one build only, then
-restore the committed defaults afterwards, so secrets never land in git.
+`radar-widget/.env` holds `PROXY_BASE` and `PROXY_KEY`, and git ignores it.
+`build.sh`, `run-sim.sh` and `deploy-device.sh` bake those values into one build
+only. The scripts then restore the committed defaults, so the secrets never go
+into git.
 
-**Sideloaded builds compared with Store installs.** A `.prg` that you copy across
-manually (a sideload) is not tied to your Garmin account, so it **never gets a
-Settings screen in Garmin Connect**. That is a Connect IQ limitation. Bake the
-config in instead, which is what `deploy-device.sh` does. Only apps installed
-from the Connect IQ **Store** show editable settings in **Garmin Connect →
-Devices → your Edge → Connect IQ Apps → Rain Radar JP → Settings**. Either way,
-at run time you need a paired phone running Garmin Connect with internet access,
-because the Edge has no cellular radio.
+**Sideloaded builds and Store installs.** A `.prg` that you copy to the device by
+hand (a sideload) is not linked to your Garmin account. As a result, a sideloaded
+widget **never gets a Settings screen in Garmin Connect**. This is a limit of
+Connect IQ. Bake the settings into the build instead, as `deploy-device.sh` does.
+Only apps from the Connect IQ **Store** show settings that you can change, in
+**Garmin Connect → Devices → your Edge → Connect IQ Apps → Rain Radar JP →
+Settings**.
 
 ### Run the unit tests
 
-`(:test)` functions cover the pure helpers in `source/Util.mc`, plus `FrameCache`
-and `FramePipeline`. Those functions compile only into a `--unit-test` build:
+The unit tests are `(:test)` functions. They cover the pure helper functions in
+`source/Util.mc`, and also `FrameCache` and `FramePipeline`. The tests compile
+only into a `--unit-test` build:
 
 ```bash
 cd radar-widget
@@ -318,57 +346,63 @@ monkeyc -d edge1040 -f monkey.jungle -o bin/test.prg -y ../developer_key.der --u
 monkeydo bin/test.prg edge1040 -t    # prints PASS/FAIL per test
 ```
 
-CI runs these tests on every PR (`.github/workflows/widgets.yml`), headless under
-Xvfb: 53 tests across the two widgets. Note that `monkeydo` exits non-zero even
-when every test passes. The `PASSED`/`FAILED` summary line is therefore the only
-reliable signal. See `.github/scripts/run-ciq-tests.sh`.
+CI runs the 53 tests for the two widgets on every pull request (PR). The tests
+run under Xvfb, with no physical display (`.github/workflows/widgets.yml`).
+`monkeydo` exits with a non-zero code even when all the tests pass. Only the
+`PASSED` or `FAILED` summary line tells you the result. See
+`.github/scripts/run-ciq-tests.sh`.
 
 ### Secret scanning
 
-[gitleaks](https://github.com/gitleaks/gitleaks) guards the proxy token and the
-Cloudflare credentials. The configuration is in `.gitleaks.toml`. CI runs
-gitleaks on every push and PR (`.github/workflows/secret-scan.yml`). Install the
-local pre-commit hook as well, so a secret is caught *before* you commit it. The
-main risk is `build.sh` baking the proxy token into
+[gitleaks](https://github.com/gitleaks/gitleaks) looks for the proxy token and
+the Cloudflare credentials in commits. Its configuration is in `.gitleaks.toml`.
+CI runs gitleaks on every push and PR (`.github/workflows/secret-scan.yml`).
+Also install the local pre-commit hook, so that gitleaks finds a secret *before*
+you commit it. The main risk is that `build.sh` writes the proxy token into
 `resources/shared/properties.xml` during a build.
 
 ```bash
 pipx install pre-commit   # or: brew install pre-commit / pip install pre-commit
-pre-commit install        # one-time, per clone
+pre-commit install        # once for each clone
 pre-commit run --all-files   # optional: scan the whole repo now
 ```
 
 ### Troubleshooting
 
-**[docs/troubleshooting.md](docs/troubleshooting.md)** collects the device,
-simulator, proxy and CI symptoms.
+**[docs/troubleshooting.md](docs/troubleshooting.md)** lists symptoms and fixes
+for the device, the simulator, the proxy and CI.
 
-## 3. Continuous integration & deployment
+## 3. Continuous integration and deployment
 
 | Workflow | Runs on | What it does |
 | --- | --- | --- |
-| `proxy.yml` | every PR; `proxy/**` pushes to `main` | Typechecks, runs the tests against the coverage thresholds, runs `npm audit` over the production dependencies and does a bundle dry-run. On `main` it deploys to Cloudflare, then smoke-tests `/health`. That smoke test asserts both that the Worker routes and that the `RATE_LIMITER` binding is live. |
-| `widgets.yml` | every PR and push | Installs the Connect IQ SDK headlessly, compiles both widgets for every product in their manifests with warnings treated as errors, and runs the 53 Monkey C unit tests in the simulator under Xvfb. |
-| `lint.yml` | every PR and push | Runs shellcheck over every `*.sh`, actionlint over the workflows and ESLint over the proxy. |
-| `secret-scan.yml` | every PR and push | Runs gitleaks across the full commit history. |
-| CodeQL | push + weekly | GitHub default setup. |
+| `proxy.yml` | Every PR, and every push to `main` that changes `proxy/**` | Checks the types and runs the tests against the coverage thresholds. Runs `npm audit` on the production dependencies and does a dry run of the bundle. On `main`, it then deploys to Cloudflare and smoke-tests `/health`. The smoke test checks that the Worker routes requests and that the `RATE_LIMITER` binding is live. |
+| `widgets.yml` | Every PR and push | Installs the Connect IQ SDK with no display. Compiles both widgets for every product in their manifests, and treats warnings as errors. Runs the 53 Monkey C unit tests in the simulator under Xvfb. |
+| `lint.yml` | Every PR and push | Runs shellcheck on every `*.sh` file, actionlint on the workflows and ESLint on the proxy. |
+| `secret-scan.yml` | Every PR and push | Runs gitleaks on the full commit history. |
+| CodeQL | Every push, and weekly | Runs GitHub's default code scanning setup. |
 
-Deploys are gated behind the `production` environment, whose branch policy
-permits only `main`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run each
-of these checks locally before you push.
+A deploy needs the `production` environment, and the branch policy for that
+environment allows only `main`. [CONTRIBUTING.md](CONTRIBUTING.md) shows how to
+run each of these checks locally before you push.
 
-**Required GitHub repo secrets** (Settings → Secrets and variables → Actions):
+**Add these GitHub repository secrets** in **Settings → Secrets and variables →
+Actions**:
 
 | Secret | What it is | Where to get it |
 | --- | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | Token CI uses to publish the Worker | see below |
-| `CLOUDFLARE_ACCOUNT_ID` | Your 32-char hex account id | `npx wrangler whoami` |
+| `CLOUDFLARE_API_TOKEN` | The token that CI uses to deploy the Worker | See below |
+| `CLOUDFLARE_ACCOUNT_ID` | Your account ID (32 hexadecimal characters) | `npx wrangler whoami` |
 
-**Create the API token:** go to
-[dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-→ **Create Token → Create Custom Token**. Give the token **Account · Workers
-Scripts · Edit**, and optionally **Account · Account Settings · Read**. Scope it
-to your account and create it. Cloudflare shows the token once.
+**Create the API token:**
+
+1. Go to
+   [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens).
+2. Select **Create Token → Create Custom Token**.
+3. Give the token the **Account · Workers Scripts · Edit** permission. You can
+   also add **Account · Account Settings · Read**.
+4. Limit the token to your account, then create it.
+5. Copy the token. Cloudflare shows it only once.
 
 **Store the secrets:**
 
@@ -378,29 +412,32 @@ gh secret set CLOUDFLARE_API_TOKEN                  # paste the token
 gh secret set CLOUDFLARE_ACCOUNT_ID                 # paste the Account ID
 ```
 
-`PROXY_TOKEN` is **not** a CI secret. It is a Worker secret, set once with
-`wrangler secret put PROXY_TOKEN`, and it persists across deploys.
+`PROXY_TOKEN` is a Worker secret, not a CI secret. You set it once with
+`wrangler secret put PROXY_TOKEN`, and it stays in place across deploys.
 
 ---
 
-## Attribution & compliance
+## Attribution and compliance
 
-- **JMA data** is under the **Public Data License v1.0**. Commercial use is
-  permitted, but you must give attribution, and processed output must say that it
-  is processed. The widget shows a combined credit line,
-  `JMA Weather (processed) · GSI Map`. The line is romanised, because device
-  fonts lack CJK glyphs unless the device language is Japanese. Keep the credit
-  line visible. Carry the full form in the store listing:
+- **JMA data** is under the **Public Data License v1.0**. You can use it
+  commercially, but you must credit the source and label processed output as
+  processed. The widget shows the combined credit line
+  `JMA Weather (processed) · GSI Map`. The line uses Latin letters, because
+  device fonts have no Japanese characters unless the device language is
+  Japanese. Keep the credit line visible. Put the full credit in the store
+  listing:
   *Source: Japan Meteorological Agency website – https://www.jma.go.jp/*
-- **GSI base map** (国土地理院コンテンツ利用規約, under Public Data License v1.0)
-  needs a source credit and a link to the tile-list page. It needs no prior
-  approval for real-time web or app display. The device shows `GSI Map`. The
-  store-listing form carries the required link:
+- The **GSI base map** is under the GSI terms of use (国土地理院コンテンツ利用規約),
+  which use the Public Data License v1.0. The terms need a source credit and a
+  link to the tile list page. Real-time display in a website or app needs no
+  approval in advance. The device shows `GSI Map`. The store listing carries the
+  required link:
   *Map: Geospatial Information Authority of Japan (地理院タイル) –
   https://maps.gsi.go.jp/development/ichiran.html*
-- The app **redisplays JMA's own nowcast**: observed N1 plus JMA's published
-  forecast N2, out to +60 min. It does **not** synthesise forecasts and it does
-  **not** issue warnings (Weather Service Act, Article 17 and Article 23).
+- The app **only shows JMA's own nowcast again**. This is the observed data (N1)
+  and JMA's published forecast (N2), up to +60 min. The app makes no forecasts of
+  its own and issues no warnings (see the Weather Service Act, Articles 17
+  and 23).
 
 ---
 
@@ -408,6 +445,6 @@ gh secret set CLOUDFLARE_ACCOUNT_ID                 # paste the Account ID
 
 The code in this repository is licensed under the [MIT License](LICENSE).
 
-This covers the code only. The JMA precipitation data and the GSI base map served
-through the app carry their own terms. See **Attribution & compliance** above and
-keep the required credits intact.
+The licence covers the code only. The JMA precipitation data and the GSI base map
+in the app have their own terms. See **Attribution and compliance** above, and
+keep the required credits in place.
