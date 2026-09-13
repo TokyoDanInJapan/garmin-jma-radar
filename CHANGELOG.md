@@ -8,6 +8,8 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ## Unreleased
 
+## [1.0.1] - 2026-09-13
+
 ### Changed
 
 - The README and the guides in `docs/` now use plain British English. Sentences
@@ -115,4 +117,5 @@ The proxy deploys continuously from `main` and is not versioned separately.
   `pull_request`, so the `test` check reports on every PR. The check can then be
   required without deadlocking PRs that do not touch `proxy/**`.
 
+[1.0.1]: https://github.com/TokyoDanInJapan/garmin-jma-radar/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TokyoDanInJapan/garmin-jma-radar/releases/tag/v1.0.0
