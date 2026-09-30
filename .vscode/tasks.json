@@ -1,10 +1,10 @@
 {
-  // Shortcuts for the two halves of the repo: the radar-widget/ widget scripts and the
-  // proxy/ npm scripts. Run any with "Tasks: Run Task" (Ctrl+Shift+P) and pick
-  // from the list, or bind a key to workbench.action.tasks.runTask. The radar-widget
-  // tasks run on the host: build.sh / run-sim.sh re-enter the 'garmin' distrobox
-  // container themselves. The proxy tasks shell out to the npm scripts in
-  // proxy/package.json.
+  // Shortcuts for the two halves of the repo: the widget scripts and the proxy/
+  // npm scripts. Run any with "Tasks: Run Task" (Ctrl+Shift+P) and pick from the
+  // list, or bind a key to workbench.action.tasks.runTask. The Garmin tasks ask
+  // which widget to act on, and run on the host: build.sh / run-sim.sh re-enter
+  // the 'garmin' distrobox container themselves. The proxy tasks shell out to the
+  // npm scripts in proxy/package.json.
   "version": "2.0.0",
   "tasks": [
     {
@@ -19,12 +19,12 @@
       "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
     },
     {
-      // Build the deployable store package (bin/RainRadar.iq). Default build task,
+      // Build the deployable store package (bin/<App>.iq). Default build task,
       // so it also runs on Ctrl+Shift+B.
       "label": "Garmin: Build",
       "type": "shell",
       "command": "./build.sh",
-      "options": { "cwd": "${workspaceFolder}/radar-widget" },
+      "options": { "cwd": "${workspaceFolder}/${input:widget}" },
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated" }
@@ -34,7 +34,7 @@
       "label": "Garmin: Deploy to device",
       "type": "shell",
       "command": "./deploy-device.sh",
-      "options": { "cwd": "${workspaceFolder}/radar-widget" },
+      "options": { "cwd": "${workspaceFolder}/${input:widget}" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
     },
@@ -44,8 +44,17 @@
       "label": "Garmin: Run simulator",
       "type": "shell",
       "command": "./run-sim.sh",
-      "options": { "cwd": "${workspaceFolder}/radar-widget" },
+      "options": { "cwd": "${workspaceFolder}/${input:widget}" },
       "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+    },
+    {
+      // Remove the sideloaded widget from a connected Edge over USB, then eject.
+      "label": "Garmin: Remove from device",
+      "type": "shell",
+      "command": "./remove-device.sh",
+      "options": { "cwd": "${workspaceFolder}/${input:widget}" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
     },
@@ -92,6 +101,15 @@
       "options": { "cwd": "${workspaceFolder}/proxy" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "widget",
+      "type": "pickString",
+      "description": "Which widget?",
+      "options": ["radar-widget", "speedtest-widget"],
+      "default": "radar-widget"
     }
   ]
 }

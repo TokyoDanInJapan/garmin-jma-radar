@@ -14,8 +14,31 @@ The proxy deploys continuously from `main` and is not versioned separately.
   the script installs `podman` and `distrobox` with `pacman`. The container is
   the same Ubuntu 22.04 container as on Ubuntu.
 
+### Changed
+
+- The widget scripts (`build.sh`, `run-sim.sh`, `deploy-device.sh` and
+  `remove-device.sh`) now share one implementation in `scripts/ciq-lib.sh`. Each
+  widget keeps a short wrapper with its own help text.
+- `build.sh` no longer edits the tracked `resources/shared/properties.xml`. It
+  bakes the proxy URL and key into a temporary copy, so two builds at once, or a
+  build that is killed, can no longer leave the key in a tracked file.
+- The VS Code tasks ask which widget to act on, and there is a new
+  "Garmin: Remove from device" task.
+
 ### Fixed
 
+- `deploy-device.sh` and `remove-device.sh` only accept a mount that has
+  `Garmin/GarminDevice.xml`, and stop with a list when more than one Garmin is
+  mounted. Before, they took the first `garmin/apps` folder they found, even on
+  a backup drive, and then ejected that drive.
+- The scripts eject a device only when it is removable, so `--dest` on a fixed
+  disk no longer unmounts that disk.
+- When the Edge is connected over MTP, the scripts now say so, instead of
+  reporting that no device is connected.
+- A proxy URL or key that contains `#` no longer breaks the build.
+- `remove-device.sh` now shows the size of each file it removes.
+- The scripts and `setup.sh` no longer mistake a container such as
+  `garmin-old` for the `garmin` container.
 - **A slow radar tile could show "no rain" for 24 hours.** When JMA timed out or
   returned a server error for a tile, the proxy drew that tile as background and
   cached the frame as immutable for a day. It now serves such a frame with

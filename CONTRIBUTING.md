@@ -72,12 +72,18 @@ duplicated in `proxy/src/index.js`, `radar-widget/source/RadarView.mc` and
 arbitrary. A seventh 288px frame makes the widget run out of memory mid-load.
 
 **Never commit secrets.** `build.sh` bakes `PROXY_BASE` and `PROXY_KEY` from a
-git-ignored `.env` into `resources/shared/properties.xml` for the duration of a
-build, then restores the file afterwards. That restore is the single most
-dangerous thing in the repo. gitleaks runs pre-commit and in CI because of it.
+git-ignored `.env` into a temporary copy of `resources/shared`, and points the
+build at it with an overlay jungle. The tracked `properties.xml` is never
+written. gitleaks still runs pre-commit and in CI, in case a key is pasted into
+a tracked file by hand.
+
+**The widget scripts share one implementation.** `scripts/ciq-lib.sh` holds the
+logic for `build.sh`, `run-sim.sh`, `deploy-device.sh` and `remove-device.sh`.
+The copies in each widget folder only set the app name and defaults, and keep
+their own `--help` text. Change the library, not a wrapper.
 
 **Never publish those secrets either.** gitleaks only sees what reaches git, and
-a baked key never does, because the restore removes it. But the key *is* compiled
+a baked key never does. But the key *is* compiled
 into the `.prg` and into the generated `<name>-settings.json`, and CI uploads
 both of those files while releases publish them.
 `.github/scripts/assert-no-credentials.sh` runs in both workflows. The script

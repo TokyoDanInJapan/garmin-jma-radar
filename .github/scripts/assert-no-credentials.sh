@@ -2,9 +2,9 @@
 #
 # Fail if a built widget carries a proxy credential.
 #
-# The risk is real and specific: build.sh injects PROXY_BASE/PROXY_KEY from a
-# git-ignored .env into resources/shared/properties.xml for the duration of a
-# build. A key baked that way is compiled into the .prg binary AND into the
+# The risk is real and specific: build.sh bakes PROXY_BASE/PROXY_KEY from a
+# git-ignored .env into the build (through a temporary copy of the resources).
+# A key baked that way is compiled into the .prg binary AND into the
 # generated <name>-settings.json – verified by baking a sentinel token and
 # finding it in both. Release assets are public, so a mistake here publishes the
 # shared secret that gates /frames and /tile.

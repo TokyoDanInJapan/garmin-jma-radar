@@ -21,6 +21,7 @@ The project has three parts:
 ```
 garmin-jma-radar/
 ├── setup.sh               # one-time toolchain setup (distrobox container + SDK + key)
+├── scripts/ciq-lib.sh     # shared code behind each widget's build/run-sim/deploy/remove scripts
 ├── docs/                  # SDK install, troubleshooting
 ├── proxy/                 # Cloudflare Worker (Node / wrangler)
 │   ├── src/
@@ -323,8 +324,8 @@ The widget reads these settings at run time. You can set them in three ways:
 
 `radar-widget/.env` holds `PROXY_BASE` and `PROXY_KEY`, and git ignores it.
 `build.sh`, `run-sim.sh` and `deploy-device.sh` bake those values into one build
-only. The scripts then restore the committed defaults, so the secrets never go
-into git.
+only. They write the values into a temporary copy of the resources, so the
+secrets never go into a tracked file.
 
 **Sideloaded builds and Store installs.** A `.prg` that you copy to the device by
 hand (a sideload) is not linked to your Garmin account. As a result, a sideloaded
@@ -358,8 +359,8 @@ run under Xvfb, with no physical display (`.github/workflows/widgets.yml`).
 the Cloudflare credentials in commits. Its configuration is in `.gitleaks.toml`.
 CI runs gitleaks on every push and PR (`.github/workflows/secret-scan.yml`).
 Also install the local pre-commit hook, so that gitleaks finds a secret *before*
-you commit it. The main risk is that `build.sh` writes the proxy token into
-`resources/shared/properties.xml` during a build.
+you commit it. The main risk is a proxy token pasted into a tracked file by hand,
+for example `resources/shared/properties.xml`.
 
 ```bash
 pipx install pre-commit   # or: brew install pre-commit / pip install pre-commit

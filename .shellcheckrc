@@ -1,0 +1,6 @@
+# The widget scripts source scripts/ciq-lib.sh. Resolve `# shellcheck source=`
+# paths relative to each script and follow them, so the variables the wrappers
+# set for the library are not reported as unused. Applies to CI, pre-commit and
+# a plain local `shellcheck` alike.
+source-path=SCRIPTDIR
+external-sources=true

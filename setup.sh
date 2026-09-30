@@ -26,6 +26,8 @@ set -euo pipefail
 BOX="${CIQ_BOX:-garmin}"
 IMAGE="${CIQ_IMAGE:-ubuntu:22.04}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ciq-lib.sh
+. "$here/scripts/ciq-lib.sh"   # ciq_box_exists
 
 say()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m    %s\033[0m\n' "$*"; }
@@ -91,7 +93,7 @@ fi
 
 # 2. Container ---------------------------------------------------------------
 say "2/5  Container '$BOX' ($IMAGE)"
-if distrobox list 2>/dev/null | grep -qw "$BOX"; then
+if ciq_box_exists "$BOX"; then
     ok "already exists"
 else
     distrobox create --name "$BOX" --image "$IMAGE" --yes
