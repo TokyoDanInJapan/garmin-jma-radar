@@ -14,8 +14,39 @@ The proxy deploys continuously from `main` and is not versioned separately.
   the script installs `podman` and `distrobox` with `pacman`. The container is
   the same Ubuntu 22.04 container as on Ubuntu.
 
+### Security
+
+- CI checks every download before it runs it: the Connect IQ SDK, the device
+  profiles, actionlint and gitleaks by SHA-256, and the `ubuntu:22.04`
+  container by digest. `npm ci` runs with `--ignore-scripts`.
+- The release job reads `GARMIN_DEVELOPER_KEY` from a `release` environment,
+  writes it owner-only to the job's temp folder and deletes it afterwards. It
+  builds from a fresh, checked SDK download instead of the shared cache.
+- Releases publish a `SHA256SUMS` file and a build provenance attestation.
+- gitleaks no longer skips `*.example` files, and `.gitignore` covers `*.der`,
+  `*.pem` and `dist/`.
+
 ### Changed
 
+- A release now refuses a tag that is not on `main` or has no CHANGELOG
+  section, and runs the unit tests before it publishes. `gh release create`
+  uses `--verify-tag`, so it can no longer create the tag on another commit,
+  and a re-run refreshes the release notes.
+- A proxy deploy runs one at a time, only from `main`, and rolls back when the
+  smoke test fails. The smoke test also checks that `/frames` refuses a request
+  with no key and accepts the deployed key.
+- Every CI job has a timeout, and `monkeydo` in the test runner stops after
+  5 minutes, instead of GitHub's 6-hour default.
+- A PR that changes no widget, script or CI file skips the widget build. A new
+  push to a PR cancels the older run, the secret scan no longer runs twice for
+  each PR, and ESLint runs in the proxy job instead of a second `npm ci`.
+- The Connect IQ and Node setup live in two composite actions, and the device
+  list comes from the manifests. The SDK version is set in one place.
+- Dependabot also updates the pre-commit hooks and the composite actions, and
+  opens npm major updates as separate PRs.
+- The README said `PROXY_TOKEN` was not a CI secret and showed `gh secret set`
+  without `--env production`. It now matches the deploy: all three secrets live
+  in the `production` environment.
 - The radar widget fetches a new frame list every 10 minutes while it stays
   open, instead of playing the first list for as long as it is open. The current
   frame stays on screen until the first new frame arrives.

@@ -1,7 +1,11 @@
 developer_key*
+# Any other signing key or private key, wherever it is saved.
+*.der
+*.pem
 radar-widget/bin
 .env
 radar-widget/.env
 bin/
+dist/
 # Generated sample frames (proxy/scripts/gen-samples.mjs)
 samples/
