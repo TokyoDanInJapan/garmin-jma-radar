@@ -8,6 +8,12 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ## Unreleased
 
+### Added
+
+- `setup.sh` now runs on Omarchy and other Arch-based systems. On these hosts,
+  the script installs `podman` and `distrobox` with `pacman`. The container is
+  the same Ubuntu 22.04 container as on Ubuntu.
+
 ## [1.0.1] - 2026-09-13
 
 ### Changed

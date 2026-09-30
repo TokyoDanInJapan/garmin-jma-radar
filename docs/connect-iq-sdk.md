@@ -34,11 +34,12 @@ sudo apt install -y libwebkit2gtk-4.1-0 libusb-1.0-0 libpng16-16   # 24.04
 `build.sh` and `run-sim.sh` find the SDK automatically through
 `~/.Garmin/ConnectIQ/current-sdk.cfg`, so you do not need to change `PATH`.
 
-## Option C: Ubuntu 24.10, 25.x or 26.04 (container)
+## Option C: Ubuntu 24.10, 25.x or 26.04, or Omarchy (container)
 
 The Garmin tools still need the old `webkit2gtk-4.0` and `libsoup2.4` libraries.
-Ubuntu removed these libraries after 22.04, so an install directly on a newer
-release fails. Instead, the tools run in an Ubuntu 22.04
+Ubuntu removed these libraries after 22.04, and Arch-based systems such as
+Omarchy do not ship them. As a result, an install directly on these hosts fails.
+Instead, the tools run in an Ubuntu 22.04
 [distrobox](https://distrobox.it/) container. The container shares your home
 directory and your display.
 
@@ -53,7 +54,8 @@ Then run the setup script from the repo root:
 `setup.sh` does all of the one-time setup, and you can safely run it again. The
 script does these steps:
 
-- installs `podman` and `distrobox` on the host
+- installs `podman` and `distrobox` on the host (with `apt` on Ubuntu, or
+  `pacman` on Omarchy and other Arch-based systems)
 - creates the `garmin` container
 - installs the libraries for the SDK and the simulator in the container
 - starts the SDK Manager, so that you can sign in and install the SDK

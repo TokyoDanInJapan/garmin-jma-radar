@@ -18,7 +18,7 @@
 | Symptom | Cause and fix |
 | --- | --- |
 | `Unable to connect` from `monkeydo` | The simulator's debug port (1234) is not ready yet. `run-sim.sh` checks the port for up to 90 s and tries to attach again. If the attach still fails, close the simulator window completely and run the script again. |
-| The simulator does not start on Ubuntu 24.10 or newer | The simulator needs `webkit2gtk-4.0` and `libsoup2.4`, and Ubuntu removed them after 22.04. Use the distrobox container. See [connect-iq-sdk.md](connect-iq-sdk.md), Option C. |
+| The simulator does not start on Ubuntu 24.10 or newer, or on Omarchy | The simulator needs `webkit2gtk-4.0` and `libsoup2.4`. Ubuntu removed them after 22.04, and Omarchy does not ship them. Use the distrobox container. See [connect-iq-sdk.md](connect-iq-sdk.md), Option C. |
 | The simulator stops responding after a forced restart | A forced stop leaves the Connect IQ host in a state that blocks the debug port. Always close the simulator from its own window. |
 | The GPS position does not change | The simulator reads the position from `simulator.ini` only when it starts from closed (a **cold** start). It also writes that file again when it closes. Close the simulator, then run `run-sim.sh --lat .. --lon ..`. To change the position while the simulator runs, use *Simulation → GPS/Position*. |
 

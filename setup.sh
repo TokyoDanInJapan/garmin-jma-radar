@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 #
-# One-time setup of the Connect IQ build/run environment on Ubuntu.
+# One-time setup of the Connect IQ build/run environment on Ubuntu or Omarchy.
 #
 # Garmin's SDK Manager and simulator link the old webkit2gtk-4.0 / libsoup2.4
-# libraries that Ubuntu dropped after 22.04. This script provisions an Ubuntu
-# 22.04 distrobox container that has those libraries (plus the JDK), so build.sh
-# and run-sim.sh work on any modern Ubuntu. Safe to re-run (idempotent).
+# libraries that Ubuntu dropped after 22.04 and that Arch no longer ships. This
+# script provisions an Ubuntu 22.04 distrobox container that has those libraries
+# (plus the JDK), so build.sh and run-sim.sh work on any modern Ubuntu, and on
+# Omarchy or another Arch-based host. Safe to re-run (idempotent).
 #
 # What it does:
-#   1. installs podman + distrobox + uidmap on the host          (sudo)
+#   1. installs podman + distrobox on the host                   (sudo)
+#      (apt on Ubuntu/Debian, pacman on Omarchy/Arch)
 #   2. creates the 'garmin' distrobox container (ubuntu:22.04)
 #   3. installs the SDK / simulator dependencies inside it
 #   4. launches the Connect IQ SDK Manager so you can install the SDK
@@ -33,26 +35,57 @@ ok()   { printf '\033[1;32m    %s\033[0m\n' "$*"; }
 if [ -e /run/.containerenv ] || [ -e /.dockerenv ]; then
     echo "Run this on the host, not inside a container." >&2; exit 1
 fi
-# Targets Ubuntu/Debian (apt).
-if ! command -v apt-get >/dev/null 2>&1; then
-    echo "This script targets Ubuntu (apt-get not found)." >&2; exit 1
+# Only the host packages differ between hosts. The container is the same.
+# Omarchy is Arch-based, so it uses pacman.
+if command -v apt-get >/dev/null 2>&1; then
+    host="ubuntu"
+elif command -v pacman >/dev/null 2>&1; then
+    host="arch"
+else
+    echo "This script targets Ubuntu (apt-get) or Omarchy/Arch (pacman)." >&2; exit 1
 fi
 
 # 1. Host packages -----------------------------------------------------------
-say "1/5  Host packages (podman, distrobox, uidmap)"
+say "1/5  Host packages (podman, distrobox, newuidmap)"
 if command -v podman >/dev/null 2>&1 && command -v distrobox >/dev/null 2>&1 \
    && command -v newuidmap >/dev/null 2>&1; then
     ok "already installed"
-else
+elif [ "$host" = "ubuntu" ]; then
     sudo apt-get update
     sudo apt-get install -y podman distrobox uidmap
     ok "installed"
+else
+    # --needed skips packages that are already current, such as Omarchy's podman.
+    # No -y: Arch does not support partial upgrades, so a stale package database
+    # is the user's full upgrade to run, not ours.
+    if ! sudo pacman -S --needed --noconfirm podman distrobox; then
+        warn "pacman failed. If it reported 'target not found' or a 404, the package"
+        warn "database is out of date. Run 'omarchy-update' (or 'sudo pacman -Syu'),"
+        warn "then run ./setup.sh again."
+        exit 1
+    fi
+    ok "installed"
 fi
 
-# Rootless podman needs subuid/subgid ranges for the current user.
-if ! grep -q "^$USER:" /etc/subuid 2>/dev/null; then
-    warn "adding subuid/subgid range for $USER (you may need to log out/in once)"
-    sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$USER"
+# Rootless podman needs subuid/subgid ranges for the current user. A fixed
+# 100000-165535 would overlap another user's range on a shared machine, and two
+# users mapped to the same host IDs can read each other's container files. So
+# take the first free range after every range already in use.
+user="${USER:-$(id -un)}"
+next_free_id() {
+    awk -F: '{ end = $2 + $3 } end > max { max = end }
+             END { print (max < 100000 ? 100000 : max) }' "$1" 2>/dev/null || echo 100000
+}
+for kind in uid gid; do
+    file="/etc/sub$kind"
+    if ! grep -q "^$user:" "$file" 2>/dev/null; then
+        start="$(next_free_id "$file")"
+        warn "adding sub$kind range $start-$((start + 65535)) for $user (you may need to log out and in once)"
+        sudo usermod "--add-sub${kind}s" "$start-$((start + 65535))" "$user"
+        added_ids=1
+    fi
+done
+if [ -n "${added_ids:-}" ]; then
     podman system migrate 2>/dev/null || true
 fi
 
