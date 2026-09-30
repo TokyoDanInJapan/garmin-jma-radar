@@ -58,7 +58,8 @@ garmin-jma-radar/
 4. The widget requests each tile with `makeImageRequest`. The proxy combines a
    3×3 block of tiles on a GSI base map into one rider-centred PNG. The PNG has
    16 colours or fewer (4-bit). The proxy caches each PNG as immutable, because
-   the image for a given valid time never changes.
+   the image for a given valid time never changes. If a tile fails upstream, the
+   proxy still returns the frame but does not cache it.
 5. The widget animates the frames on a timer. It labels each frame with its valid
    time, for example `21:45 now` or `22:00 +15m`. The **Wide** and **Local**
    buttons on the screen change the zoom preset.
@@ -140,6 +141,32 @@ npx wrangler deploy
 ```
 
 Keep a copy of that URL. You need it for the widget settings later.
+
+<details>
+<summary><strong>Caching, CPU time and the free plan</strong></summary>
+
+Cloudflare's edge cache (the Cache API) does not work on `*.workers.dev`. It
+works only when the Worker runs on a custom domain or route. On `workers.dev`,
+the proxy keeps recent frames, frame lists and decoded base-map tiles in the
+memory of each Worker instance instead. That catches most repeats, but a new
+instance starts empty.
+
+Rendering a frame is the expensive part. On a desktop CPU, a frame with little
+rain takes about 6–8 ms, and a busy frame about 11–14 ms. The free plan allows
+10 ms of CPU time for each request, so some renders can fail with error 1102.
+If that happens often, use a custom domain, so that the edge cache serves
+repeats, or move to the Workers Paid plan.
+</details>
+
+<details>
+<summary><strong>The token in logs</strong></summary>
+
+The widget sends the token as `?key=` on `/tile` requests, because Garmin's
+image requests cannot set headers. Request URLs, and so the token, can appear in
+Workers Logs (`[observability]` in `wrangler.toml`) and in the logs of Garmin's
+image relay. If the token leaks, set a new one with `wrangler secret put
+PROXY_TOKEN` and update the widget settings.
+</details>
 
 <details>
 <summary><strong>Run the proxy locally (optional)</strong></summary>
