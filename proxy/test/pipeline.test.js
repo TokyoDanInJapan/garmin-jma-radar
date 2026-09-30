@@ -98,3 +98,33 @@ test("/tile degrades to a frame when a tile fetch throws (network error/timeout)
     installDefaults();
   }
 });
+
+test("/tile does not cache a frame when a tile failed (not 404)", async () => {
+  let puts = 0;
+  globalThis.caches = { default: { match: async () => undefined, put: async () => { puts++; } } };
+  const okFetch = globalThis.fetch;
+  // Radar tiles 503, base tiles are fine: the frame renders but is degraded.
+  globalThis.fetch = async (url, init) =>
+    String(url).includes("hrpns") ? new Response("busy", { status: 503 }) : okFetch(url, init);
+  try {
+    const r = await call("/tile?lat=35.68&lon=139.76&z=10&basetime=20260627120000&validtime=20260627123000&key=secret");
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("Cache-Control"), "no-store");
+    assert.equal(puts, 0);
+  } finally {
+    installDefaults();
+  }
+});
+
+test("/tile caches a frame whose tiles 404 (no rain is a real answer)", async () => {
+  let puts = 0;
+  globalThis.caches = { default: { match: async () => undefined, put: async () => { puts++; } } };
+  globalThis.fetch = async () => new Response("nope", { status: 404 });
+  try {
+    const r = await call("/tile?lat=35.68&lon=139.76&z=10&basetime=20260627120000&validtime=20260627123000&key=secret");
+    assert.match(r.headers.get("Cache-Control"), /immutable/);
+    assert.equal(puts, 1);
+  } finally {
+    installDefaults();
+  }
+});
