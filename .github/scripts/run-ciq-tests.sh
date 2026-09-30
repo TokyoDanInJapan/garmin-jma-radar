@@ -76,7 +76,9 @@ sleep 2   # the port can flap right after first appearing, so let it settle
 
 echo "==> Running tests: $(basename "$prg") on $device"
 # Ignore the exit code on purpose (see header). The summary line is the signal.
-monkeydo "$prg" "$device" -t >"$result" 2>&1 || true
+# timeout: a wedged simulator would otherwise hold the job for GitHub's 6-hour
+# default. A full run takes well under a minute.
+timeout 300 monkeydo "$prg" "$device" -t >"$result" 2>&1 || true
 cat "$result"
 
 summary="$(grep -E '^(PASSED|FAILED)' "$result" | tail -1 || true)"

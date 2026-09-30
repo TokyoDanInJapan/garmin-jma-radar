@@ -1,0 +1,47 @@
+name: Set up Connect IQ
+description: >-
+  Install the Connect IQ SDK and the device profiles for every product in the
+  widget manifests, and put the SDK on PATH. Expects a checkout, and the
+  toolchain packages the workflow installs before checkout.
+inputs:
+  cache:
+    description: >-
+      Restore and save the SDK through actions/cache. The release job passes
+      false, so the code that signs a release is always a fresh download that
+      install-connectiq.sh has checked against its pinned SHA-256.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    # The device list comes from the manifests, so a new <iq:product> is
+    # installed (and cached) without editing any workflow.
+    - name: List target devices
+      id: devices
+      shell: bash
+      run: |
+        devices=$(sed -nE 's/.*<iq:product id="([^"]+)".*/\1/p' ./*/manifest.xml | sort -u | tr '\n' ' ')
+        echo "list=$devices" >> "$GITHUB_OUTPUT"
+        echo "Devices: $devices"
+
+    # ~310 MB of SDK plus the device profiles. The key covers the installer
+    # (which pins the SDK version and both checksums) and the device list.
+    - name: Cache Connect IQ SDK and device profiles
+      if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.Garmin/ConnectIQ/Sdks
+          ~/.Garmin/ConnectIQ/Devices
+        key: ciq-${{ hashFiles('.github/scripts/install-connectiq.sh') }}-${{ hashFiles('*/manifest.xml') }}
+
+    - name: Install Connect IQ toolchain
+      shell: bash
+      env:
+        DEVICES: ${{ steps.devices.outputs.list }}
+      run: |
+        # shellcheck disable=SC2086 # one word per device, on purpose
+        .github/scripts/install-connectiq.sh $DEVICES
+
+    - name: Add SDK to PATH
+      shell: bash
+      run: echo "$(cat ~/.Garmin/ConnectIQ/current-sdk.cfg)/bin" >> "$GITHUB_PATH"

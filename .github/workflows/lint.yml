@@ -3,8 +3,9 @@ name: lint
 # Static checks that apply to the whole repo rather than one subtree, so this
 # runs on every path – which also makes it safe to mark as a required check
 # (see the note in widgets.yml about path-filtered checks deadlocking PRs).
+# ESLint runs in proxy.yml's test job, which already installs the proxy.
 #
-# All three checks pass cleanly as of the commit that added them, so any finding
+# Both checks pass cleanly as of the commit that added them, so any finding
 # here is a regression introduced by the change under review, not pre-existing
 # debt to negotiate with.
 on:
@@ -16,11 +17,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The build/deploy/setup scripts do the genuinely error-prone work in this
       # repo – baking secrets into a staged resource copy, device detection, PID
@@ -33,23 +41,18 @@ jobs:
           printf '  %s\n' "${scripts[@]}"
           shellcheck "${scripts[@]}"
 
+      # Checked against the SHA-256 from the release's checksums file before it
+      # is unpacked. Bump both together, and keep the version in sync with
+      # .pre-commit-config.yaml.
       - name: actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
         run: |
-          curl -fsSL --retry 3 \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            | tar -xz -C /usr/local/bin actionlint
+          set -euo pipefail
+          tgz="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL --retry 3 -o "$tgz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "$ACTIONLINT_SHA256  $tgz" | sha256sum -c -
+          tar -xzf "$tgz" -C /usr/local/bin actionlint
           actionlint -color
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: proxy/package-lock.json
-
-      - name: eslint
-        working-directory: proxy
-        run: |
-          npm ci
-          npm run lint

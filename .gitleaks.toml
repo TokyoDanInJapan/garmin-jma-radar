@@ -44,11 +44,10 @@ secretGroup = 2
 keywords = ["proxykey", "proxytoken"]
 
 # --- Allowlist: committed templates and documented placeholders -------------
+# No path allowlist: a real key pasted into .env.example is exactly as public as
+# one anywhere else. The templates pass on their placeholders alone.
 [allowlist]
-description = "Ignore example templates and documented placeholder tokens"
-paths = [
-  '''.*\.example$''',          # radar-widget/.env.example, proxy/.dev.vars.example
-]
+description = "Ignore documented placeholder tokens"
 regexes = [
   '''YOURNAME''',              # placeholder host in PROXY_BASE
   '''dev-local-token''',       # placeholder in .dev.vars.example

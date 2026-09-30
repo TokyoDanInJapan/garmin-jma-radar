@@ -109,9 +109,35 @@ PR, rather than mixing it into a behaviour change.
 
 Widgets are released by tag. The proxy deploys continuously from `main`.
 
+1. Move the `## Unreleased` entries in CHANGELOG.md under a `## [0.2.0] - <date>`
+   heading, and merge that to `main`.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```bash
+   git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+   ```
+
+`release.yml` refuses a tag that is not on `main` or has no CHANGELOG section.
+It runs the unit tests, builds the packages, checks that no proxy credential is
+baked in, and publishes the release with a `SHA256SUMS` file and a build
+provenance attestation. To check a download:
+
 ```bash
-git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify radar-widget-edge1040.prg -R <owner>/garmin-jma-radar
 ```
+
+**The signing key.** Store `GARMIN_DEVELOPER_KEY` (the base64-encoded DER) in
+the `release` environment, never as a repository secret, and give that
+environment a deployment rule that allows only `v*` tags. A workflow edited on
+a branch can then never read the key.
+
+```bash
+base64 -w0 developer_key.der | gh secret set GARMIN_DEVELOPER_KEY --env release
+```
+
+In **Settings → Environments → release**, choose **Deployment branches and
+tags → Selected branches and tags**, and add the tag rule `v*`.
 
 A tag attaches these files, per widget and per product in its manifest:
 
@@ -126,6 +152,15 @@ A tag attaches these files, per widget and per product in its manifest:
 
 None of these files have proxy credentials baked in. CI has no `.env`, so users
 set the proxy URL and key in the widget's settings.
+
+**Updating pinned downloads.** CI checks every download against a pinned
+SHA-256 or digest. When you bump one, update its pin in the same commit:
+
+- the SDK version and `SDK_SHA256` in `.github/scripts/install-connectiq.sh`
+- `ACTIONLINT_SHA256` in `lint.yml` and `GITLEAKS_SHA256` in
+  `secret-scan.yml`, from each release's checksums file
+- the `ubuntu:22.04@sha256:` digest in `widgets.yml` and `release.yml`, from
+  `docker buildx imagetools inspect ubuntu:22.04`
 
 ## Reporting bugs
 

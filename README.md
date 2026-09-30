@@ -407,23 +407,28 @@ for the device, the simulator, the proxy and CI.
 
 | Workflow | Runs on | What it does |
 | --- | --- | --- |
-| `proxy.yml` | Every PR, and every push to `main` that changes `proxy/**` | Checks the types and runs the tests against the coverage thresholds. Runs `npm audit` on the production dependencies and does a dry run of the bundle. On `main`, it then deploys to Cloudflare and smoke-tests `/health`. The smoke test checks that the Worker routes requests and that the `RATE_LIMITER` binding is live. |
-| `widgets.yml` | Every PR and push | Installs the Connect IQ SDK with no display. Compiles both widgets for every product in their manifests, and treats warnings as errors. Runs the 53 Monkey C unit tests in the simulator under Xvfb. |
-| `lint.yml` | Every PR and push | Runs shellcheck on every `*.sh` file, actionlint on the workflows and ESLint on the proxy. |
-| `secret-scan.yml` | Every PR and push | Runs gitleaks on the full commit history. |
+| `proxy.yml` | Every PR, and every push to `main` that changes `proxy/**` | Runs ESLint, checks the types and runs the tests against the coverage thresholds. Runs `npm audit` on the production dependencies and does a dry run of the bundle. On `main`, it then deploys to Cloudflare and smoke-tests the deployment: `/health` must report the `RATE_LIMITER` binding, and `/frames` must refuse a request with no key and accept the deployed key. If the smoke test fails, the job rolls the Worker back to the previous version. |
+| `widgets.yml` | Every PR that changes the widgets, their scripts or CI, and every push to `main` | Installs the Connect IQ SDK with no display. Compiles both widgets for every product in their manifests, and treats warnings as errors. Runs the Monkey C unit tests in the simulator under Xvfb. On a PR that changes none of those paths, the build is skipped and the check still passes. |
+| `lint.yml` | Every PR and push to `main` | Runs shellcheck on every `*.sh` file and actionlint on the workflows. |
+| `secret-scan.yml` | Every PR and push to `main` | Runs gitleaks on the full commit history. |
+| `release.yml` | A `v*` tag | Checks that the tag is on `main` and has a CHANGELOG section, runs the unit tests, and publishes the packages with a `SHA256SUMS` file and a build provenance attestation. See [CONTRIBUTING.md](CONTRIBUTING.md#releases). |
 | CodeQL | Every push, and weekly | Runs GitHub's default code scanning setup. |
 
-A deploy needs the `production` environment, and the branch policy for that
-environment allows only `main`. [CONTRIBUTING.md](CONTRIBUTING.md) shows how to
-run each of these checks locally before you push.
+Every download CI runs is pinned: actions by commit SHA, the `ubuntu:22.04`
+container by digest, and the Connect IQ SDK, the device profiles, actionlint
+and gitleaks by SHA-256. [CONTRIBUTING.md](CONTRIBUTING.md) shows how to run
+each of these checks locally before you push.
 
-**Add these GitHub repository secrets** in **Settings → Secrets and variables →
-Actions**:
+**Deploy secrets.** A deploy runs in the `production` environment, whose
+branch policy allows only `main`. Store these three secrets in that
+environment, not as repository secrets. Any workflow on any branch can read a
+repository secret.
 
 | Secret | What it is | Where to get it |
 | --- | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | The token that CI uses to deploy the Worker | See below |
 | `CLOUDFLARE_ACCOUNT_ID` | Your account ID (32 hexadecimal characters) | `npx wrangler whoami` |
+| `PROXY_TOKEN` | The Worker's auth token (see [step 1](#1-deploy-the-proxy)) | The value you generated with `openssl rand -hex 16` |
 
 **Create the API token:**
 
@@ -438,13 +443,15 @@ Actions**:
 **Store the secrets:**
 
 ```bash
-CLOUDFLARE_API_TOKEN=<paste> npx wrangler whoami   # verify token + print Account ID
-gh secret set CLOUDFLARE_API_TOKEN                  # paste the token
-gh secret set CLOUDFLARE_ACCOUNT_ID                 # paste the Account ID
+CLOUDFLARE_API_TOKEN=<paste> npx wrangler whoami         # verify token + print Account ID
+gh secret set CLOUDFLARE_API_TOKEN  --env production     # paste the token
+gh secret set CLOUDFLARE_ACCOUNT_ID --env production     # paste the Account ID
+gh secret set PROXY_TOKEN           --env production     # paste the Worker token
 ```
 
-`PROXY_TOKEN` is a Worker secret, not a CI secret. You set it once with
-`wrangler secret put PROXY_TOKEN`, and it stays in place across deploys.
+Every deploy uploads `PROXY_TOKEN` to the Worker, so the GitHub secret is the
+one to change when you rotate the token. A value set only with
+`wrangler secret put` is replaced by the next deploy.
 
 ---
 

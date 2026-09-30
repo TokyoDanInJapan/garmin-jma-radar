@@ -17,10 +17,11 @@
 #   install-connectiq.sh <device> [<device> ...]
 #
 # Environment:
-#   CIQ_SDK_VERSION  SDK version to install, as listed in sdks.json.
-#   CIQ_DEVICES_URL  Zip of device profiles, each in a <device>/ folder at the
-#                    zip root. Defaults to the pinned community archive below.
-#                    Point this at your own mirror to drop that dependency.
+#   CIQ_DEVICES_URL     Zip of device profiles, each in a <device>/ folder at
+#                       the zip root. Defaults to the pinned community archive
+#                       below. Point this at your own mirror to drop that
+#                       dependency, and set CIQ_DEVICES_SHA256 to match it.
+#   CIQ_DEVICES_SHA256  SHA-256 of that zip. Required with CIQ_DEVICES_URL.
 #   CIQ_HOME         Install root. Must stay ~/.Garmin/ConnectIQ: the path is
 #                    hardcoded in both the compiler and the simulator.
 #
@@ -32,7 +33,14 @@
 set -euo pipefail
 
 SDK_BASE="https://developer.garmin.com/downloads/connect-iq/sdks"
-SDK_VERSION="${CIQ_SDK_VERSION:-9.2.0}"
+# The one place the CI SDK version is set. The workflows' cache keys hash this
+# file, so a bump here also invalidates the cached toolchain. Keep it in step
+# with the SDK developers install locally (docs/connect-iq-sdk.md).
+SDK_VERSION="9.2.0"
+# Garmin publishes no checksum, so this hash was taken from the first download
+# of this version (trust on first use). It still stops a changed or corrupted
+# zip from being unpacked and run in a job that can hold the signing key.
+SDK_SHA256="4907d8455b651c5a00a865e364cc4f1921c055b9279c7c8634c7a7a6773b5593"
 CIQ_HOME="${CIQ_HOME:-$HOME/.Garmin/ConnectIQ}"
 
 # Device profiles are Garmin assets with no public download (see above). This
@@ -40,7 +48,13 @@ CIQ_HOME="${CIQ_HOME:-$HOME/.Garmin/ConnectIQ}"
 # so the contents can't shift under us. It is the weakest link in this workflow:
 # if it disappears, set CIQ_DEVICES_URL to a mirror you control.
 DEVICES_PIN="de516a7b50defc1df0eeb5fe8ad116b301358781"
-DEVICES_URL="${CIQ_DEVICES_URL:-https://raw.githubusercontent.com/matco/connectiq-tester/${DEVICES_PIN}/devices.zip}"
+if [[ -n "${CIQ_DEVICES_URL:-}" ]]; then
+    DEVICES_URL="$CIQ_DEVICES_URL"
+    DEVICES_SHA256="${CIQ_DEVICES_SHA256:?set CIQ_DEVICES_SHA256 to the SHA-256 of $CIQ_DEVICES_URL}"
+else
+    DEVICES_URL="https://raw.githubusercontent.com/matco/connectiq-tester/${DEVICES_PIN}/devices.zip"
+    DEVICES_SHA256="f5c40592470f5c9681d3bd6fd8062fc1a9b8f584c99554a601a45ba186a40df7"
+fi
 
 if [[ $# -eq 0 ]]; then
     echo "Usage: $0 <device> [<device> ...]" >&2
@@ -49,6 +63,17 @@ fi
 devices=("$@")
 
 say() { printf '\n==> %s\n' "$*"; }
+
+# Downloads go to a private temp folder, removed on exit.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+verify() {  # <file> <sha256>
+    if ! echo "$2  $1" | sha256sum -c --quiet -; then
+        echo "Checksum mismatch for $(basename "$1"). Refusing to unpack it." >&2
+        exit 1
+    fi
+}
 
 # --- SDK --------------------------------------------------------------------
 # sdks.json maps a version to its per-platform filenames. Resolve ours rather
@@ -68,9 +93,9 @@ if [[ -x "$sdk_dir/bin/monkeyc" ]]; then
 else
     say "Downloading $sdk_file (~210 MB)"
     mkdir -p "$sdk_dir"
-    curl -fsSL --retry 3 -o /tmp/connectiq-sdk.zip "$SDK_BASE/$sdk_file"
-    unzip -q /tmp/connectiq-sdk.zip -d "$sdk_dir"
-    rm -f /tmp/connectiq-sdk.zip
+    curl -fsSL --retry 3 -o "$tmp/sdk.zip" "$SDK_BASE/$sdk_file"
+    verify "$tmp/sdk.zip" "$SDK_SHA256"
+    unzip -q "$tmp/sdk.zip" -d "$sdk_dir"
     chmod +x "$sdk_dir/bin/"*
 fi
 # build.sh and the SDK Manager both read this to locate the active SDK.
@@ -87,13 +112,13 @@ if [[ ${#missing[@]} -eq 0 ]]; then
 else
     say "Fetching device profiles: ${missing[*]}"
     mkdir -p "$CIQ_HOME/Devices"
-    curl -fsSL --retry 3 -o /tmp/devices.zip "$DEVICES_URL"
+    curl -fsSL --retry 3 -o "$tmp/devices.zip" "$DEVICES_URL"
+    verify "$tmp/devices.zip" "$DEVICES_SHA256"
     # Extract only what we build for. The archive carries every device Garmin
     # has ever shipped and we need two of them.
     patterns=()
     for d in "${missing[@]}"; do patterns+=("$d/*"); done
-    unzip -qo /tmp/devices.zip "${patterns[@]}" -d "$CIQ_HOME/Devices"
-    rm -f /tmp/devices.zip
+    unzip -qo "$tmp/devices.zip" "${patterns[@]}" -d "$CIQ_HOME/Devices"
 
     for d in "${missing[@]}"; do
         if [[ ! -f "$CIQ_HOME/Devices/$d/compiler.json" ]]; then
@@ -109,9 +134,9 @@ fi
 key="$CIQ_HOME/ci-key.der"
 if [[ ! -f "$key" ]]; then
     say "Generating ephemeral signing key"
-    openssl genrsa -out /tmp/ci-key.pem 4096 2>/dev/null
-    openssl pkcs8 -topk8 -inform PEM -outform DER -in /tmp/ci-key.pem -out "$key" -nocrypt
-    rm -f /tmp/ci-key.pem
+    (umask 077
+     openssl genrsa -out "$tmp/ci-key.pem" 4096 2>/dev/null
+     openssl pkcs8 -topk8 -inform PEM -outform DER -in "$tmp/ci-key.pem" -out "$key" -nocrypt)
 fi
 
 # --- Sanity: will the compiler look where we installed? ---------------------

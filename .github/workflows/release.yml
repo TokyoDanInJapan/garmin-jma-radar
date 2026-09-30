@@ -17,8 +17,10 @@ on:
 permissions:
   contents: read
 
-env:
-  CIQ_SDK_VERSION: '9.2.0'
+# One release run per tag at a time. A re-run waits rather than races.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   # Split from `publish` because the build needs the container and the release
@@ -26,7 +28,14 @@ jobs:
   # ubuntu:22.04, so calling `gh release create` from in here fails with 127.
   build:
     runs-on: ubuntu-latest
-    container: ubuntu:22.04
+    timeout-minutes: 30
+    # GARMIN_DEVELOPER_KEY lives in this environment, not in the repository
+    # secrets. Give the environment a deployment rule that allows only v* tags,
+    # so a workflow edited on a branch can't read the key that signs Store
+    # uploads. See CONTRIBUTING.md, "Releases".
+    environment: release
+    # Pinned by digest. See widgets.yml.
+    container: ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
     outputs:
       store_ready: ${{ steps.key.outputs.store_ready }}
     # Container jobs default to `sh -e {0}`, not bash. The steps below use
@@ -44,25 +53,43 @@ jobs:
         run: |
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            ca-certificates curl git jq unzip openssl openjdk-17-jre-headless
+            ca-certificates curl git jq unzip openssl openjdk-17-jre-headless \
+            libwebkit2gtk-4.0-37 libusb-1.0-0 libsm6 xvfb procps
           rm -rf /var/lib/apt/lists/*
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0              # the tag check below needs main's history
+          persist-credentials: false
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # A manual run takes any ref as its input. Refuse anything but a tag on
+      # main that the CHANGELOG describes, so the assets, the tag and the notes
+      # always name the same commit.
+      - name: Check the tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if ! git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+            echo "::error::$TAG is not a tag"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/tags/$TAG^{commit}" origin/main; then
+            echo "::error::$TAG is not on main"; exit 1
+          fi
+          if ! grep -qE "^## \[${TAG#v}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [${TAG#v}]' section"; exit 1
+          fi
+
+      - uses: ./.github/actions/setup-connectiq
         with:
-          path: |
-            ~/.Garmin/ConnectIQ/Sdks
-            ~/.Garmin/ConnectIQ/Devices
-          key: ciq-${{ env.CIQ_SDK_VERSION }}-${{ hashFiles('.github/scripts/install-connectiq.sh') }}
+          cache: 'false'
 
-      - name: Install Connect IQ toolchain
-        run: .github/scripts/install-connectiq.sh edge1030plus edge1040
-
-      - name: Add SDK to PATH
-        run: echo "$(cat ~/.Garmin/ConnectIQ/current-sdk.cfg)/bin" >> "$GITHUB_PATH"
+      # The same tests widgets.yml runs, so a tag on a commit whose CI never
+      # finished can't publish a broken build.
+      - name: Run Monkey C unit tests
+        run: .github/scripts/test-widgets.sh ~/.Garmin/ConnectIQ/ci-key.der
 
       # A Connect IQ Store listing is bound to the developer key that first
       # published it, so a Store-uploadable .iq must be signed with the real one.
@@ -75,8 +102,11 @@ jobs:
           DEVELOPER_KEY: ${{ secrets.GARMIN_DEVELOPER_KEY }}
         run: |
           if [[ -n "$DEVELOPER_KEY" ]]; then
-            printf '%s' "$DEVELOPER_KEY" | base64 -d > /tmp/release-key.der
-            echo "path=/tmp/release-key.der" >> "$GITHUB_OUTPUT"
+            # Owner-only, in the job's own temp folder, and deleted by the
+            # cleanup step below whatever happens.
+            key="$RUNNER_TEMP/release-key.der"
+            (umask 077 && printf '%s' "$DEVELOPER_KEY" | base64 -d > "$key")
+            echo "path=$key" >> "$GITHUB_OUTPUT"
             echo "store_ready=true" >> "$GITHUB_OUTPUT"
             echo "Signing with the repository developer key."
           else
@@ -128,6 +158,10 @@ jobs:
       - name: Assert no proxy credential is baked in
         run: .github/scripts/assert-no-credentials.sh dist
 
+      - name: Delete the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release-key.der"
+
       # Explicit globs, not the whole of dist/: the .prg build also drops a
       # <name>-settings.json next to each binary, which is build scaffolding
       # nobody downloads. Listing the three release kinds keeps that scaffolding
@@ -146,14 +180,29 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest    # no container, so the runner's `gh` is on PATH
+    timeout-minutes: 10
     permissions:
       contents: write         # create the release and upload assets
+      id-token: write         # sign the build provenance attestation
+      attestations: write     # store it
 
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-packages
           path: dist
+
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum ./*.prg ./*.iq ./*.prg.debug.xml > SHA256SUMS
+
+      # Signed statement that these files came from this workflow run at this
+      # commit. Check a download with `gh attestation verify <file> -R <repo>`.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.prg
+            dist/*.iq
 
       - name: Create release
         env:
@@ -194,6 +243,9 @@ jobs:
             echo "strips debug info, so the stack trace in \`GARMIN/APPS/LOGS/CIQ_LOG.YML\`"
             echo "cannot be decoded without it."
             echo
+            echo "\`SHA256SUMS\` lists the checksum of every file. Each package also"
+            echo "has a build provenance attestation: \`gh attestation verify <file> -R $GH_REPO\`."
+            echo
             echo "See [CHANGELOG.md](CHANGELOG.md) for what changed."
           } > /tmp/notes.md
 
@@ -203,14 +255,18 @@ jobs:
           # strips debug info) produces stack traces in CIQ_LOG.YML that cannot
           # be decoded without it. It is not reproducible after the fact.
           shopt -s nullglob
-          assets=(dist/*.prg dist/*.iq dist/*.prg.debug.xml)
+          assets=(dist/*.prg dist/*.iq dist/*.prg.debug.xml dist/SHA256SUMS)
           printf 'Attaching %d assets:\n' "${#assets[@]}"
           printf '  %s\n' "${assets[@]}"
 
-          # Idempotent: re-running workflow_dispatch on the same tag replaces assets.
+          # Idempotent: re-running workflow_dispatch on the same tag replaces the
+          # assets and the notes (store_ready may have changed). --verify-tag:
+          # never let gh create a missing tag on the default branch, which would
+          # attach these assets to a different commit.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${assets[@]}" --clobber
+            gh release edit "$TAG" --notes-file /tmp/notes.md
           else
-            gh release create "$TAG" "${assets[@]}" \
+            gh release create "$TAG" "${assets[@]}" --verify-tag \
               --title "$TAG" --notes-file /tmp/notes.md
           fi

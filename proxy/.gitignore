@@ -4,6 +4,8 @@ node_modules/
 # Wrangler build artifacts & local state (do not commit)
 .wrangler/
 .dev.vars
+# wrangler deploy --dry-run --outdir dist (see CONTRIBUTING.md)
+dist/
 
 # Secrets
 *.local

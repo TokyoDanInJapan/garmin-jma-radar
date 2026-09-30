@@ -1,15 +1,27 @@
 version: 2
 updates:
+  # Minor and patch updates arrive together. A major update gets a PR of its
+  # own, so one breaking bump can't hold every other update back.
   - package-ecosystem: npm
     directory: /proxy
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
     groups:
-      npm-dependencies:
-        patterns:
-          - "*"
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The workflows and the composite actions they call both pin actions by SHA.
   - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+
+  # The hook revisions in .pre-commit-config.yaml. The gitleaks and actionlint
+  # versions (and checksums) in the workflows still need a manual bump to match.
+  - package-ecosystem: pre-commit
     directory: /
     schedule:
       interval: weekly
