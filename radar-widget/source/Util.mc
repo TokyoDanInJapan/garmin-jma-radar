@@ -74,20 +74,96 @@ module Util {
     // Retry server/transport errors (5xx, rate-limit, BLE/network) – these are
     // transient, most often Garmin's image-fetch service flaking on a tile the
     // proxy itself serves fine. Don't retry auth/4xx. Those won't fix themselves.
+    // Nor will three transport codes that describe the request, not the link:
+    // a response too large (-402) or out of memory (-403) fails the same way
+    // again, and over BLE each retry can take ~90 s to do so, and an http://
+    // proxy URL (-1001) needs a settings change.
     function isRetryable(code as Lang.Number) as Lang.Boolean {
+        if (code == -402 || code == -403 || code == -1001) { return false; }
         return code <= 0 || code == 429 || code >= 500;
     }
 
-    // Map a Communications response code to a short user-facing message. CIQ
-    // reports transport failures (phone/BLE/network down) as zero/negative
-    // codes. Positive values are the HTTP status from the proxy. The proxy's
-    // own failure modes are called out explicitly: auth (401), rate-limit (429),
-    // and upstream/render errors (5xx).
+    // Map a Communications response code to a short user-facing message.
+    // Positive values are the HTTP status from the proxy, with its own failure
+    // modes called out: bad coordinates (400), auth (401), rate limit (429) and
+    // upstream/render errors (5xx). Zero and negative values are Connect IQ
+    // transport codes. 0 is this app's own "no callback in time" (the watchdogs).
     function httpErrorMsg(code as Lang.Number) as Lang.String {
-        if (code <= 0)   { return "No phone connection"; }
-        if (code == 401) { return "Auth failed: check key"; }
-        if (code == 429) { return "Server busy: try later"; }
-        if (code >= 500) { return "Server error (" + code + ")"; }
+        if (code == 0)     { return "No connection"; }
+        if (code == -104)  { return "Phone not connected"; }
+        if (code == -2 || code == -300) { return "Timed out"; }
+        if (code == -402 || code == -403) { return "Image too large"; }
+        if (code == -1001) { return "Proxy URL must be https"; }
+        if (code < 0)      { return "Network error (" + code + ")"; }
+        if (code == 400)   { return "Outside Japan?"; }
+        if (code == 401)   { return "Auth failed: check key"; }
+        if (code == 429)   { return "Server busy: try later"; }
+        if (code >= 500)   { return "Server error (" + code + ")"; }
         return "Request failed (" + code + ")";
+    }
+
+    // Why the proxy settings can't work, or null if they look usable. The
+    // shipped default URL is a placeholder, so treat it like an empty one. The
+    // key travels with every request, so plain http is refused, except for a
+    // proxy on this machine (wrangler dev in the simulator).
+    function settingsError(base as Lang.String, key as Lang.String) as Lang.String or Null {
+        if (base.length() == 0 || base.find("YOURNAME") != null) { return "Set Proxy URL in settings"; }
+        if (base.find("https://") != 0
+                && base.find("http://localhost") != 0 && base.find("http://127.0.0.1") != 0) {
+            return "Proxy URL must be https";
+        }
+        if (key.length() == 0) { return "Set Proxy key in settings"; }
+        return null;
+    }
+
+    // A coordinate as a 3-decimal string (~110 m). The proxy rounds the same way
+    // for its tile URLs, and the device never needs more to pick a radar tile, so
+    // the exact position never leaves the device.
+    function coordStr(v as Lang.Float or Lang.Double) as Lang.String {
+        return v.format("%.3f");
+    }
+
+    // The /frames "frames" value as a list of at most `max` URL strings, or null
+    // if it isn't a non-empty Array of Strings. The `as` casts in Monkey C do no
+    // run-time checking, so an unexpected body would otherwise crash on .size()
+    // or .find(). Capped because a seventh frame runs the device out of memory,
+    // and a different proxy could ignore the n= limit.
+    function frameList(v, max as Lang.Number) as Lang.Array<Lang.String> or Null {
+        if (!(v instanceof Lang.Array) || v.size() == 0) { return null; }
+        var n = (v.size() > max) ? max : v.size();
+        for (var i = 0; i < n; i += 1) {
+            if (!(v[i] instanceof Lang.String)) { return null; }
+        }
+        return v.slice(0, n) as Lang.Array<Lang.String>;
+    }
+
+    // The first n items of an optional per-frame array (labels are Strings,
+    // offsets are Numbers), or null when it is missing, too short or holds the
+    // wrong type. Null just hides the label, so it is always a safe answer.
+    function perFrame(v, n as Lang.Number, numbers as Lang.Boolean) as Lang.Array or Null {
+        if (!(v instanceof Lang.Array) || v.size() < n) { return null; }
+        for (var i = 0; i < n; i += 1) {
+            var ok = numbers ? (v[i] instanceof Lang.Number) : (v[i] instanceof Lang.String);
+            if (!ok) { return null; }
+        }
+        return v.slice(0, n);
+    }
+
+    // The frame to show on the next playback tick. Frames stream in oldest to
+    // newest. While loading, only move FORWARDS to the next loaded frame and hold
+    // on the newest one until a newer frame arrives, so the time shown climbs
+    // steadily. Looping the whole set while loading would wrap back to -15m on
+    // every lap. Once loading is done, wrap around, so a missing frame can't
+    // freeze playback at a gap. With nothing loaded, stay put.
+    function nextFrame(cur as Lang.Number, loaded as Lang.Array<Lang.Boolean>, done as Lang.Boolean) as Lang.Number {
+        var n = loaded.size();
+        for (var i = cur + 1; i < n; i += 1) {
+            if (loaded[i]) { return i; }
+        }
+        if (!done) { return cur; }
+        for (var i = 0; i < n; i += 1) {
+            if (loaded[i]) { return i; }
+        }
+        return cur;
     }
 }

@@ -4,8 +4,14 @@
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `Set Proxy URL in settings` | The proxy URL is empty. Bake it into the build with `.env`. For a Store install, set it in Garmin Connect. |
-| `Request failed (404)` | The proxy URL is wrong or is still the placeholder. Or no Worker is deployed at that host. |
+| `Set Proxy URL in settings` or `Set Proxy key in settings` | The proxy URL is empty or still the `YOURNAME` placeholder, or the key is empty. Bake them into the build with `.env`. For a Store install, set them in Garmin Connect. |
+| `Proxy URL must be https` | The proxy URL starts with `http://`. The key goes with every request, so the widgets only accept `https://`, or `http://localhost` for `wrangler dev` in the simulator. |
+| `Request failed (404)` | The proxy URL is wrong, or no Worker is deployed at that host. |
+| `Outside Japan?` | The proxy returned `400`. It serves positions in Japan only, and the GPS position is outside that area. |
+| `Phone not connected` or `No connection` | The Edge has neither a phone connection nor Wi-Fi. Connect one and tap **Retry**. |
+| `Timed out` or `Timed out: try Wi-Fi` | A request did not finish in time. Over Bluetooth, images go through Garmin's image service, which is slow. Wi-Fi is much faster. |
+| `Image too large` | The device ran out of memory for a frame. Lower **Frame count** in the settings. |
+| `Update failed` on the title row | The widget refreshes the radar every 10 minutes while it stays open. The refresh failed, so the old frame stays on screen, and the widget tries again 10 minutes later. |
 | `Auth failed: check key` | The proxy key does not match the Worker's `PROXY_TOKEN`. The proxy key is the Worker token, not a Cloudflare API token. |
 | `Acquiring GPS...` or `No GPS fix` | The widget has no GPS fix yet. Go outside, or set a position in the simulator. After the widget shows a failure, tap the screen to try again. |
 | You cannot find the app on the device | Rain Radar JP is a *widget*, so it is not in the Connect IQ Apps menu. Open it from the widget loop. Swipe down, then swipe left or right. If the widget is not on the device at all, the build used the wrong product ID, or the `.prg` went into the wrong folder. |

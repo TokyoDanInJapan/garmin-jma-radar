@@ -156,6 +156,7 @@ function testIsRetryableTransient(logger) {
     // <=0 transport failures, 429 rate-limit, and 5xx are all retryable.
     return Util.isRetryable(0)
         && Util.isRetryable(-1)
+        && Util.isRetryable(-104)
         && Util.isRetryable(429)
         && Util.isRetryable(500)
         && Util.isRetryable(503);
@@ -169,17 +170,31 @@ function testIsRetryableNotForClientErrors(logger) {
         && !Util.isRetryable(404);
 }
 
+(:test)
+function testIsRetryableNotForTooLargeOrInsecure(logger) {
+    // These fail the same way on every attempt.
+    return !Util.isRetryable(-402)
+        && !Util.isRetryable(-403)
+        && !Util.isRetryable(-1001);
+}
+
 // ---- httpErrorMsg ----------------------------------------------------------
 (:test)
 function testHttpErrorMsgTransport(logger) {
-    return Util.httpErrorMsg(0).equals("No phone connection")
-        && Util.httpErrorMsg(-5).equals("No phone connection");
+    return Util.httpErrorMsg(0).equals("No connection")
+        && Util.httpErrorMsg(-104).equals("Phone not connected")
+        && Util.httpErrorMsg(-2).equals("Timed out")
+        && Util.httpErrorMsg(-300).equals("Timed out")
+        && Util.httpErrorMsg(-402).equals("Image too large")
+        && Util.httpErrorMsg(-1001).equals("Proxy URL must be https")
+        && Util.httpErrorMsg(-5).equals("Network error (-5)");
 }
 
 (:test)
 function testHttpErrorMsgAuthAndRateLimit(logger) {
     return Util.httpErrorMsg(401).equals("Auth failed: check key")
-        && Util.httpErrorMsg(429).equals("Server busy: try later");
+        && Util.httpErrorMsg(429).equals("Server busy: try later")
+        && Util.httpErrorMsg(400).equals("Outside Japan?");
 }
 
 (:test)
@@ -191,4 +206,69 @@ function testHttpErrorMsgServerErrorIncludesCode(logger) {
 function testHttpErrorMsgFallbackIncludesCode(logger) {
     // An unclassified positive status (for example, 418) falls through to the generic.
     return Util.httpErrorMsg(418).equals("Request failed (418)");
+}
+
+// ---- settingsError ---------------------------------------------------------
+(:test)
+function testSettingsErrorPlaceholderAndEmpty(logger) {
+    return Util.settingsError("", "k").equals("Set Proxy URL in settings")
+        && Util.settingsError("https://jma-rain-radar-proxy.YOURNAME.workers.dev", "k")
+            .equals("Set Proxy URL in settings")
+        && Util.settingsError("https://p.example", "").equals("Set Proxy key in settings");
+}
+
+(:test)
+function testSettingsErrorNeedsHttpsExceptLocal(logger) {
+    return Util.settingsError("http://p.example", "k").equals("Proxy URL must be https")
+        && Util.settingsError("https://p.example", "k") == null
+        && Util.settingsError("http://localhost:8787", "k") == null
+        && Util.settingsError("http://127.0.0.1:8787", "k") == null;
+}
+
+// ---- coordStr --------------------------------------------------------------
+(:test)
+function testCoordStrRoundsToThreeDecimals(logger) {
+    return Util.coordStr(35.681236d).equals("35.681")
+        && Util.coordStr(139.7676d).equals("139.768")
+        && Util.coordStr(34.0d).equals("34.000");
+}
+
+// ---- frameList / perFrame --------------------------------------------------
+(:test)
+function testFrameListValidatesAndCaps(logger) {
+    var ok = Util.frameList(["/a", "/b", "/c"], 2);
+    return ok.size() == 2 && ok[1].equals("/b")
+        && Util.frameList(null, 6) == null
+        && Util.frameList([], 6) == null
+        && Util.frameList("nope", 6) == null
+        && Util.frameList(["/a", 5], 6) == null
+        && Util.frameList({ "a" => 1 }, 6) == null;
+}
+
+(:test)
+function testPerFrameChecksTypeAndLength(logger) {
+    var labels = Util.perFrame(["10:00", "10:15", "10:30"], 2, false);
+    return labels.size() == 2 && labels[0].equals("10:00")
+        && Util.perFrame([0, 15], 2, true).size() == 2
+        && Util.perFrame(["10:00"], 2, false) == null       // too short
+        && Util.perFrame([0, "15"], 2, true) == null        // wrong type
+        && Util.perFrame(null, 1, false) == null;
+}
+
+// ---- nextFrame -------------------------------------------------------------
+(:test)
+function testNextFrameMovesForwardToLoaded(logger) {
+    return Util.nextFrame(0, [true, false, true], false) == 2;
+}
+
+(:test)
+function testNextFrameHoldsOnEdgeWhileLoading(logger) {
+    // Still loading and nothing newer is ready: stay on the newest frame.
+    return Util.nextFrame(2, [true, true, true, false], false) == 2;
+}
+
+(:test)
+function testNextFrameWrapsWhenDone(logger) {
+    return Util.nextFrame(2, [false, true, true], true) == 1
+        && Util.nextFrame(0, [false, false, false], true) == 0;
 }

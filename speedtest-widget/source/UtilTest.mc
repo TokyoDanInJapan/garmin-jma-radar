@@ -38,3 +38,13 @@ function testSecsStrFormatsOneDecimal(logger) {
         && Util.secsStr(1500).equals("1.5s")
         && Util.secsStr(27000).equals("27.0s");
 }
+
+(:test)
+function testSettingsErrorFlagsUnusableSettings(logger) {
+    return Util.settingsError("https://jma-rain-radar-proxy.YOURNAME.workers.dev", "k")
+            .equals("Set Proxy URL in settings")
+        && Util.settingsError("http://p.example", "k").equals("Proxy URL must be https")
+        && Util.settingsError("https://p.example", "").equals("Set Proxy key in settings")
+        && Util.settingsError("https://p.example", "k") == null
+        && Util.settingsError("http://localhost:8787", "k") == null;
+}

@@ -63,6 +63,8 @@ garmin-jma-radar/
 5. The widget animates the frames on a timer. It labels each frame with its valid
    time, for example `21:45 now` or `22:00 +15m`. The **Wide** and **Local**
    buttons on the screen change the zoom preset.
+6. While the widget stays open, it fetches a new frame list every 10 minutes.
+   The current frame stays on screen until the first new frame arrives.
 
 `frameCount` (1–6) sets the maximum number of frames on Wi-Fi. Over Bluetooth,
 the widget loads three frames at most (see
@@ -164,7 +166,8 @@ repeats, or move to the Workers Paid plan.
 The widget sends the token as `?key=` on `/tile` requests, because Garmin's
 image requests cannot set headers. Request URLs, and so the token, can appear in
 Workers Logs (`[observability]` in `wrangler.toml`) and in the logs of Garmin's
-image relay. If the token leaks, set a new one with `wrangler secret put
+image relay. `/frames` requests send the token in the `X-Proxy-Key` header
+instead, so it stays out of those URLs. If the token leaks, set a new one with `wrangler secret put
 PROXY_TOKEN` and update the widget settings.
 </details>
 

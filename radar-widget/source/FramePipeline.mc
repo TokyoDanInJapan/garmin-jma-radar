@@ -71,7 +71,6 @@ class FramePipeline {
     hidden var mInflightIndex = -1; // frame index of the in-flight request (-1 = none)
     hidden var mLoadedCount = 0;    // how many bitmaps have arrived
     hidden var mNextRequest = 0;    // index of the next frame URL to request
-    hidden var mInflight = 0;       // image requests currently in flight (0 or 1)
     hidden var mLastCode = 0;       // last non-200 code (0 = none yet, or a watchdog timeout)
     hidden var mRetryQueue as Lang.Array<Lang.Number> = []; // frame indices awaiting a retry
     hidden var mAttempts as Lang.Array<Lang.Number> = [];   // retry attempts used per frame
@@ -160,7 +159,7 @@ class FramePipeline {
 
     // Every request attempted: none in flight, none queued or pending retry.
     function done() {
-        return mFrames != null && mInflight == 0
+        return mFrames != null && !mAwaiting
             && mNextRequest >= mFrameUrls.size() && mRetryQueue.size() == 0;
     }
 
@@ -176,7 +175,6 @@ class FramePipeline {
         mInflightIndex = -1;
         mLoadedCount = 0;
         mNextRequest = 0;
-        mInflight = 0;
         mLastCode = 0;
         mRetryQueue = [];
         mAttempts = [];
@@ -261,14 +259,14 @@ class FramePipeline {
     // requestFrameImage. Left unchecked that recurses for every queued
     // frame/retry and overflows the stack on-device. mPumping turns it into a
     // loop: the nested call returns immediately and this frame issues the next
-    // request. mInflight is bumped BEFORE the request so a synchronous callback
-    // decrements it back to 0 and the loop advances. An async request leaves it
-    // at 1 and the loop exits.
+    // request. requestFrameImage sets mAwaiting BEFORE the request, so a
+    // synchronous callback clears it again and the loop advances. An async
+    // request leaves it set and the loop exits.
     function pumpRequests() {
         if (mFrameUrls == null) { return; }
         if (mPumping) { return; }   // a synchronous callback re-entered, so let the loop below continue
         mPumping = true;
-        while (mInflight == 0
+        while (!mAwaiting
                 && (mRetryQueue.size() > 0 || mNextRequest < mFrameUrls.size())) {
             var index;
             // New frames first, retries after. Over BLE an abandoned transfer
@@ -287,7 +285,6 @@ class FramePipeline {
             // frame filled by a salvaged late arrival while it sat in the retry
             // queue. Popping it here drains the queue without a wasteful re-fetch.
             if (mFrames[index] != null) { continue; }
-            mInflight += 1;
             requestFrameImage(index);
         }
         mPumping = false;
@@ -312,7 +309,7 @@ class FramePipeline {
         var options = {
             :maxWidth => DEVICE_TILE_SIZE,
             :maxHeight => DEVICE_TILE_SIZE,
-            // Proxy already delivers a 256-colour palette PNG. Don't re-dither.
+            // Proxy already delivers a 16-colour palette PNG. Don't re-dither.
             :dithering => Communications.IMAGE_DITHERING_NONE
         };
         // Arm the watchdog before firing: if the callback never returns (hung
@@ -356,7 +353,7 @@ class FramePipeline {
             return;
         }
         // The watchdog may already have given this request up (treated it as a
-        // timeout). Ignore the late callback so we don't double-count mInflight.
+        // timeout). Ignore the late callback so it isn't counted twice.
         if (!mAwaiting) { return; }
         mAwaiting = false;
         finishImage(index, code, data);
@@ -367,7 +364,6 @@ class FramePipeline {
     // belongs to (captured per-request). Notifies the listener last, so it
     // observes the post-pump state.
     function finishImage(index as Lang.Number, code as Lang.Number, data) as Void {
-        if (mInflight > 0) { mInflight -= 1; }
         mInflightIndex = -1;
 
         if (code == 200 && data != null) {

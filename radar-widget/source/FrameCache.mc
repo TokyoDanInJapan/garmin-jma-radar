@@ -106,7 +106,8 @@ class FrameCache {
     }
 
     // Delete persisted frames whose URL isn't in `urls`, and rewrite the index
-    // to just the survivors.
+    // to just the survivors. Only when something was dropped: this runs on every
+    // load, and most reopens change nothing.
     hidden function prune(urls as Lang.Array<Lang.String>) as Void {
         var idx = indexList();
         var keep = [];
@@ -118,6 +119,8 @@ class FrameCache {
                 mStore.remove(u);
             }
         }
-        mStore.put(FRAME_CACHE_INDEX_KEY, keep);
+        if (keep.size() != idx.size()) {
+            mStore.put(FRAME_CACHE_INDEX_KEY, keep);
+        }
     }
 }
