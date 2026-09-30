@@ -15,101 +15,14 @@
 #   ./deploy-device.sh --no-eject       # leave the device mounted afterwards
 #   ./deploy-device.sh -h
 #
+
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-device="edge1030plus"
-dest=""
-eject=1
-envfile="$here/../radar-widget/.env"          # reuse the radar's secrets
-key="$here/../developer_key.der"; [ -f "$key" ] || key="$here/../developer_key"
-prgname="SpeedTest.PRG"
-
-# Print the header comment block as help. Derived from the file rather than a
-# fixed line range, which silently truncated the examples whenever the header
-# grew: drop the shebang, stop at the first non-comment line, strip the '# '.
-usage() { sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "${BASH_SOURCE[0]}"; exit "${1:-0}"; }
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -d|--device) device="$2"; shift 2 ;;
-        --dest)      dest="$2"; shift 2 ;;
-        --no-eject)  eject=0; shift ;;
-        -e|--env)    envfile="$2"; shift 2 ;;
-        -k|--key)    key="$2"; shift 2 ;;
-        -h|--help)   usage 0 ;;
-        *) echo "Unknown argument: $1" >&2; usage 1 ;;
-    esac
-done
-
-if [[ ! -f "$envfile" ]]; then
-    echo "No $envfile. This script bakes the Proxy URL/key into the build." >&2
-    echo "Create radar-widget/.env (see radar-widget/.env.example), or pass -e <file>." >&2
-    exit 1
-fi
-
-# --- Locate the connected Garmin's Apps folder ------------------------------
-find_apps_dir() {
-    if [[ -n "$dest" ]]; then
-        [[ -d "$dest" ]] && { printf '%s\n' "$dest"; return 0; }
-        return 1
-    fi
-    local root apps
-    for root in "/media/$USER"/* "/run/media/$USER"/* /media/* /mnt/*; do
-        [[ -d "$root" ]] || continue
-        apps="$(find "$root" -maxdepth 2 -type d -ipath '*garmin/apps' 2>/dev/null | head -1)"
-        [[ -n "$apps" ]] && { printf '%s\n' "$apps"; return 0; }
-    done
-    return 1
-}
-
-apps_dir="$(find_apps_dir)" || {
-    echo "Couldn't find a connected Garmin device (no */GARMIN/Garmin/Apps mount)." >&2
-    echo "Plug the Edge in by USB and wait for it to mount, or pass --dest <Apps dir>." >&2
-    exit 1
-}
-echo "Device: $device"
-echo "Target: $apps_dir/$prgname"
-
-# --- Build with .env baked in -----------------------------------------------
-out="$here/bin/$prgname"
-echo
-echo "Building (with .env baked in)..."
-export CIQ_NO_SIM_UPDATE=1
-"$here/build.sh" -d "$device" -o "$out" -k "$key" -e "$envfile"
-
-# --- Copy onto the device ---------------------------------------------------
-echo
-echo "Copying to device..."
-cp "$out" "$apps_dir/$prgname"
-sync
-echo "Copied $prgname ($(du -h "$apps_dir/$prgname" | cut -f1)) -> $apps_dir"
-
-settings_dir="$apps_dir/SETTINGS"
-if [[ -d "$settings_dir" ]]; then
-    # Read into an array: the match is unquoted-glob-safe that way, and a device
-    # path with a space in it can't split into two bogus rm arguments.
-    mapfile -t stale < <(find "$settings_dir" -maxdepth 1 -iname "${prgname%.*}.SET" 2>/dev/null || true)
-    if [[ ${#stale[@]} -gt 0 ]]; then
-        rm -f "${stale[@]}" && sync && echo "Cleared stale device settings: ${stale[*]}"
-    fi
-fi
-
-# --- Eject so the Edge leaves USB mode and loads the app --------------------
-if [[ "$eject" -eq 1 ]]; then
-    devnode="$(findmnt -no SOURCE --target "$apps_dir" 2>/dev/null || true)"
-    if [[ -n "$devnode" ]] && command -v udisksctl >/dev/null 2>&1; then
-        if udisksctl unmount -b "$devnode" >/dev/null 2>&1; then
-            echo "Ejected $devnode. Safe to unplug."
-        else
-            echo "Copied OK, but auto-eject failed; eject it manually before unplugging."
-        fi
-    else
-        echo "Copied OK; eject the device manually before unplugging."
-    fi
-fi
-
-echo
-echo "On the Edge: unplug, then open 'Proxy Speed Test' from the widget loop"
-echo "(swipe down from the home screen, then swipe left/right)."
+# shellcheck source=../scripts/ciq-lib.sh
+. "$here/../scripts/ciq-lib.sh"
+CIQ_WIDGET_DIR="$here"
+CIQ_APP=SpeedTest
+CIQ_APP_LABEL="Proxy Speed Test"
+CIQ_ENV_DEFAULT="$here/../radar-widget/.env"
+ciq_deploy_main "$@"
