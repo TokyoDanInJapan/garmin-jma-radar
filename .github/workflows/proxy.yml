@@ -25,14 +25,17 @@ defaults:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A new push to a PR supersedes the run in progress.
+    concurrency:
+      group: proxy-test-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22            # wrangler v4 (4.103) requires Node 22+
-          cache: npm
-          cache-dependency-path: proxy/package-lock.json
-      - run: npm ci
+          persist-credentials: false
+      - uses: ./.github/actions/setup-proxy
+      - run: npm run lint         # eslint
       - run: npm run typecheck    # tsc --noEmit over the JS sources (checkJs)
       # Runs the suite with coverage thresholds attached (see package.json), so
       # a change that adds an untested branch fails here rather than quietly
@@ -48,22 +51,27 @@ jobs:
 
   deploy:
     needs: test
-    # Deploy on push to main, or when manually triggered via "Run workflow".
+    # Deploy on push to main, or when manually triggered via "Run workflow" on
+    # main. The environment's branch policy also enforces main, but a check
+    # here does not depend on a repository setting.
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-      || github.event_name == 'workflow_dispatch'
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    # Cloudflare credentials live in this environment's secrets. Its branch
-    # policy only allows deployments from main.
+    timeout-minutes: 10
+    # Two quick merges must not deploy out of order, and a deploy must never
+    # be cancelled halfway.
+    concurrency:
+      group: proxy-production
+      cancel-in-progress: false
+    # CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID and PROXY_TOKEN live in this
+    # environment's secrets. Its branch policy only allows deployments from main.
     environment: production
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22            # wrangler v4 (4.103) requires Node 22+
-          cache: npm
-          cache-dependency-path: proxy/package-lock.json
-      - run: npm ci   # installs upng-js so wrangler can bundle it
+          persist-credentials: false
+      - uses: ./.github/actions/setup-proxy   # installs upng-js so wrangler can bundle it
       - uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4
         id: deploy
         with:
@@ -76,7 +84,7 @@ jobs:
           # truth (the drifting hardcoded pin is what broke the deploy).
           # Upload the Worker's PROXY_TOKEN from the GitHub secret on every
           # deploy, so the deployed Worker's secret stays in sync with the
-          # value stored in GitHub (Settings → Secrets → Actions → PROXY_TOKEN).
+          # value stored in GitHub (the production environment's PROXY_TOKEN).
           secrets: |
             PROXY_TOKEN
         env:
@@ -86,10 +94,14 @@ jobs:
       # /health is unauthenticated precisely so it can be probed here: `ok`
       # proves the Worker boots and routes, and `rateLimiter` proves the
       # RATE_LIMITER binding in wrangler.toml actually materialised at runtime –
-      # the one part of the config that silently no-ops when it's wrong.
+      # the one part of the config that silently no-ops when it's wrong. The
+      # /frames probes prove the token gate: no key is refused, and the
+      # deployed PROXY_TOKEN is accepted. /health alone would pass a Worker
+      # that refuses every real request.
       - name: Smoke-test the deployment
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+          PROXY_TOKEN: ${{ secrets.PROXY_TOKEN }}
         run: |
           if [[ -z "$DEPLOY_URL" ]]; then
             echo "::error::wrangler-action reported no deployment URL; cannot verify the deploy"
@@ -121,4 +133,25 @@ jobs:
             echo "::error::RATE_LIMITER is not bound in the deployed Worker. /frames and /tile are unprotected"
             exit 1
           fi
-          echo "Deployment verified: routing up, rate-limit binding live."
+          frames="$DEPLOY_URL/frames?lat=35.68&lon=139.76&z=8&n=1"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$frames")
+          if [[ "$code" != "401" ]]; then
+            echo "::error::/frames without a key returned $code, not 401"
+            exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+                   -H "X-Proxy-Key: $PROXY_TOKEN" "$frames")
+          if [[ "$code" != "200" ]]; then
+            echo "::error::/frames with the deployed key returned $code, not 200"
+            exit 1
+          fi
+          echo "Deployment verified: routing up, rate-limit binding live, token gate works."
+
+      # A deploy that fails its smoke test is already live, so put the previous
+      # version back rather than leave riders on a broken Worker.
+      - name: Roll back a failed deployment
+        if: failure() && steps.deploy.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler rollback --yes --message "Smoke test failed for ${GITHUB_SHA::7}"
