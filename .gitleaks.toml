@@ -24,10 +24,14 @@ useDefault = true   # keep all of gitleaks' built-in provider rules (Cloudflare,
 
 # PROXY_TOKEN / PROXY_KEY / proxyKey assignment, or a ?key= URL param, followed by
 # a long hex (>=32, covers `openssl rand -hex 16` and -hex 32) or base64-ish value.
+# secretGroup is load-bearing in both rules. Without it gitleaks treats the first
+# capture group (the keyword) as the secret, so --redact masks "PROXY_TOKEN" and
+# prints the token itself in the public CI log.
 [[rules]]
 id = "jma-proxy-token-assignment"
 description = "JMA radar proxy shared secret in an assignment or URL param"
 regex = '''(?i)(proxy[_-]?token|proxy[_-]?key|x-proxy-key|[?&]key)["']?\s*[=:]\s*["']?([0-9a-f]{32,}|[A-Za-z0-9+/]{40,}={0,2})'''
+secretGroup = 2
 keywords = ["proxy_token", "proxytoken", "proxy-key", "proxykey", "x-proxy-key", "key="]
 
 # The same secret baked into the Connect IQ properties.xml as element text:
@@ -36,6 +40,7 @@ keywords = ["proxy_token", "proxytoken", "proxy-key", "proxykey", "x-proxy-key",
 id = "jma-proxy-token-properties-xml"
 description = "JMA radar proxy shared secret baked into properties.xml"
 regex = '''(?i)id=["']proxy(key|token)["'][^>]{0,40}>\s*([0-9a-f]{32,})'''
+secretGroup = 2
 keywords = ["proxykey", "proxytoken"]
 
 # --- Allowlist: committed templates and documented placeholders -------------
