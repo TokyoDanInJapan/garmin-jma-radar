@@ -3,12 +3,14 @@
  * JMA Rain Radar proxy for Garmin Edge devices.
  *
  * Responsibilities:
- *   1. Resolve JMA's targetTimes_N2.json -> ordered list of {basetime, validtime}
+ *   1. Resolve JMA's targetTimes_N1/N2.json -> ordered list of {basetime, validtime}
  *   2. For a rider lat/lon + zoom, compute the tile that contains them
  *   3. Fetch the radar tile (+ optional base map) for each frame, composite,
  *      crop to a device-friendly size, and return a single PNG per frame.
  *   4. Cache aggressively so JMA's undocumented endpoints are hit once per
- *      frame, not once per device.
+ *      frame, not once per device. The edge cache (Cache API) only works on a
+ *      custom domain or route, so an in-memory LRU per isolate (memo.js) backs
+ *      it up on *.workers.dev.
  *
  * Endpoints exposed to the device:
  *   GET /frames?lat=..&lon=..&z=10&n=6
@@ -23,16 +25,22 @@
  * Attribution (出典: 気象庁) + "processed" notice must be shown in the app UI.
  */
 
-import { getFrameTimes, radarTileURL, jstLabel } from "./jma.js";
+import { getFrameTimes, isPlausibleFrame, radarTileURL, jstLabel } from "./jma.js";
 import { baseTileURL } from "./basemap.js";
 import { lonLatToTileXY } from "./tilemath.js";
-import { composite, speedtestPNG } from "./composite.js";
+import { composite, decodeTile, speedtestPNG, windowTileOffsets } from "./composite.js";
+import * as memo from "./memo.js";
 
-// px. Fills the Edge 1030/1040 width (282px). 8-bit palette ≈ 81KB/frame on
-// device. A cross-project contract: must match DEVICE_TILE_SIZE in both widgets
-// (radar-widget RadarView.mc, speedtest-widget SpeedTestView.mc).
+// px. Fills the Edge 1030/1040 width (282px). A 16-colour (4-bit) palette is
+// about 41 KB per frame in device memory. A cross-project contract: must match
+// DEVICE_TILE_SIZE in both widgets (radar-widget FramePipeline.mc,
+// speedtest-widget SpeedTestView.mc).
 const DEVICE_TILE_SIZE = 288;
-const TILE = 256; // slippy tile size, matching tilemath.js / composite.js
+
+// Part of every /tile cache key. Bump it whenever a change alters the rendered
+// pixels (palette size, opacity, base style, marker, DEVICE_TILE_SIZE), or the
+// edge keeps serving the old rendering for a day.
+const RENDER_VERSION = 2;
 
 // Scope is Japan only (README): reject coordinates outside a generous box around
 // the JMA nowcast coverage. Bounding requests here caps the cache/key space an
@@ -97,7 +105,7 @@ export default {
         case "/frames":
           authorize(request, url, env);
           await rateLimit(request, env);
-          return await handleFrames(url, env, ctx);
+          return await handleFrames(url);
         case "/tile":
           authorize(request, url, env);
           await rateLimit(request, env);
@@ -132,7 +140,7 @@ export default {
  * fetch and animate. We hand back fully-formed /tile URLs so the device does
  * zero math beyond looping the array.
  */
-async function handleFrames(url, env, ctx) {
+async function handleFrames(url) {
   const { lat, lon, z } = geoParams(url);
 
   // -15..+60 min window in 15-min steps (assembled in jma.js). `n` is the
@@ -140,12 +148,14 @@ async function handleFrames(url, env, ctx) {
   // jma.js's priority order (now, +60, +30, ...) and played oldest-first.
   // Defaults to the full set. jma.js clamps it to the memory-safe maximum.
   const n = int(url, "n", 6);
-  const recent = await getFrameTimes(env, ctx, n); // [{basetime, validtime, offset}, ...]
+  const recent = await getFrameTimes(n); // [{basetime, validtime, offset}, ...]
 
-  // Round to ~11m so trivially-different fixes collapse onto the same /tile URL
-  // (and the same cache entry). 4 decimals is sub-pixel at every supported zoom.
-  const rlat = round4(lat);
-  const rlon = round4(lon);
+  // Round to 3 decimals (~110 m) so nearby fixes collapse onto the same /tile
+  // URL and cache entry, and so the tile URLs, which pass through Garmin's image
+  // relay and sit in device storage, do not carry the rider's exact position.
+  // The rounding error is at most ~55 m: under 1 px even at z=11 (~63 m/px).
+  const rlat = round3(lat);
+  const rlon = round3(lon);
   const frames = recent.map((t) => {
     const q = new URLSearchParams({
       lat: String(rlat),
@@ -173,12 +183,15 @@ async function handleFrames(url, env, ctx) {
 
 /**
  * Produce a single rider-centred PNG frame. Heavily cached (immutable per
- * basetime/validtime/lat/lon/z) so JMA is hit at most once per unique frame.
+ * basetime/validtime/tile pixel/z), in memory and at the edge.
  */
 async function handleTile(url, env, ctx) {
   const { lat, lon, z } = geoParams(url);
   const basetime = timestamp(url, "basetime");
   const validtime = timestamp(url, "validtime");
+  if (!isPlausibleFrame(basetime, validtime, Date.now())) {
+    throw new HttpError(400, "basetime/validtime is not a current JMA frame");
+  }
 
   // Which tile contains the rider, and where inside it they sit (for centring).
   const { x, y, px, py } = lonLatToTileXY(lon, lat, z);
@@ -187,8 +200,11 @@ async function handleTile(url, env, ctx) {
   // Any two riders that resolve to the same tile pixel share one cache entry, so
   // sub-pixel jitter in the query string can't fan out into unbounded entries
   // (and unbounded JMA origin fetches).
+  const canonical = `https://radar.invalid/tile?r=${RENDER_VERSION}&o=${DEVICE_TILE_SIZE}`
+    + `&z=${z}&x=${x}&y=${y}&px=${px}&py=${py}&b=${basetime}&v=${validtime}`;
+  const inMemory = memo.frames.get(canonical);
+  if (inMemory) return pngResponse(inMemory, IMMUTABLE);
   const cache = caches.default;
-  const canonical = `https://radar.invalid/tile?z=${z}&x=${x}&y=${y}&px=${px}&py=${py}&b=${basetime}&v=${validtime}`;
   const cacheKey = new Request(canonical, { method: "GET" });
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
@@ -202,11 +218,11 @@ async function handleTile(url, env, ctx) {
   const dxs = windowTileOffsets(px, DEVICE_TILE_SIZE);
   const dys = windowTileOffsets(py, DEVICE_TILE_SIZE);
   const [base, radar] = await Promise.all([
-    fetchNeighbourhood({ x, y, dxs, dys, urlFor: (tx, ty) => baseTileURL({ z, x: tx, y: ty }), cacheTtl: 86400 }),
+    fetchNeighbourhood({ x, y, dxs, dys, urlFor: (tx, ty) => baseTileURL({ z, x: tx, y: ty }), cacheTtl: 86400, keep: memo.baseTiles }),
     fetchNeighbourhood({ x, y, dxs, dys, urlFor: (tx, ty) => radarTileURL({ z, x: tx, y: ty, basetime, validtime }), cacheTtl: 300 }),
   ]);
 
-  const png = await composite({
+  const png = composite({
     baseTiles: base.tiles,   // {dx,dy -> Uint8Array PNG | null}
     radarTiles: radar.tiles, // {dx,dy -> Uint8Array PNG | null}
     centerPx: px,
@@ -219,17 +235,29 @@ async function handleTile(url, env, ctx) {
   // as background, but it must not be cached. Otherwise one slow JMA response
   // during rain pins "no rain" for 24 h, at the edge and in every downstream
   // cache. A 404 is not a failure: it is JMA's "no rain here".
-  const degraded = base.degraded || radar.degraded;
-  const resp = new Response(png, {
+  if (base.degraded || radar.degraded) return pngResponse(png, "no-store");
+  const resp = pngResponse(png, IMMUTABLE);
+  memo.frames.set(canonical, png);
+  ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+  return resp;
+}
+
+// Per-frame images are immutable: a given validtime never changes.
+const IMMUTABLE = "public, max-age=86400, immutable";
+
+/**
+ * @param {Uint8Array} png
+ * @param {string} cacheControl
+ * @returns {Response}
+ */
+function pngResponse(png, cacheControl) {
+  return new Response(png, {
     headers: {
       "Content-Type": "image/png",
       "X-Content-Type-Options": "nosniff",
-      // Per-frame images are immutable: a given validtime never changes.
-      "Cache-Control": degraded ? "no-store" : "public, max-age=86400, immutable",
+      "Cache-Control": cacheControl,
     },
   });
-  if (!degraded) ctx.waitUntil(cache.put(cacheKey, resp.clone()));
-  return resp;
 }
 
 // Lazily-rendered, per-isolate cache of the fixed speed-test asset. The
@@ -248,51 +276,37 @@ let speedtestBytes = null;
  */
 function handleSpeedTest() {
   if (!speedtestBytes) speedtestBytes = speedtestPNG(DEVICE_TILE_SIZE);
-  return new Response(speedtestBytes, {
-    headers: {
-      "Content-Type": "image/png",
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": "public, max-age=86400, immutable",
-    },
-  });
+  return pngResponse(speedtestBytes, IMMUTABLE);
 }
 
-/**
- * Which tile offsets (-1/0/1) a centred `out`-px window overlaps on one axis.
- * `center` is the rider's pixel within the centre tile (0..255). The window's
- * top-left in 3x3-grid coords is TILE+center-floor(out/2). A tile column/row c
- * (c in 0..2, offset c-1) is included iff the window intersects [c*TILE,
- * (c+1)*TILE). composite.js reads exactly these cells, so the dropped ones can't
- * affect the output.
- */
-function windowTileOffsets(center, out) {
-  const half = Math.floor(out / 2);
-  const g0 = TILE + center - half;
-  const g1 = g0 + out - 1;
-  const offs = [];
-  for (let c = 0; c <= 2; c++) {
-    const lo = c * TILE;
-    if (g0 <= lo + TILE - 1 && g1 >= lo) offs.push(c - 1);
-  }
-  return offs;
-}
+/** @typedef {import("./composite.js").Decoded} Decoded */
 
 /**
- * Fetch the requested tile offsets. tiles["dx,dy"] = PNG bytes | null.
- * `degraded` is true when any tile failed rather than 404'd.
+ * Fetch and decode the requested tile offsets. tiles["dx,dy"] = tile | null.
+ * `degraded` is true when any tile failed rather than 404'd. With `keep`,
+ * decoded tiles (and 404s) are kept in that in-memory cache by URL.
+ * @param {{ x: number, y: number, dxs: number[], dys: number[],
+ *   urlFor: (x: number, y: number) => string, cacheTtl: number,
+ *   keep?: import("./memo.js").Lru<Decoded | null> }} args
  */
-async function fetchNeighbourhood({ x, y, dxs, dys, urlFor, cacheTtl }) {
+async function fetchNeighbourhood({ x, y, dxs, dys, urlFor, cacheTtl, keep }) {
   const jobs = [];
-  /** @type {Record<string, Uint8Array | null>} */
+  /** @type {Record<string, Decoded | null>} */
   const tiles = {};
   let degraded = false;
   for (const dx of dxs) {
     for (const dy of dys) {
       const u = urlFor(x + dx, y + dy);
+      const kept = keep?.get(u);
+      if (kept !== undefined) {
+        tiles[`${dx},${dy}`] = kept;
+        continue;
+      }
       jobs.push(
-        fetchTilePNG(u, cacheTtl).then((t) => {
-          tiles[`${dx},${dy}`] = t.bytes; // null if 404 (no-rain / off-grid) or failed
+        fetchTile(u, cacheTtl).then((t) => {
+          tiles[`${dx},${dy}`] = t.tile; // null if 404 (no-rain / off-grid) or failed
           if (t.degraded) degraded = true;
+          else keep?.set(u, t.tile);
         })
       );
     }
@@ -302,16 +316,15 @@ async function fetchNeighbourhood({ x, y, dxs, dys, urlFor, cacheTtl }) {
 }
 
 /**
- * Fetch a single PNG tile. 404 => bytes null (empty radar / off-grid base).
- * A network error, timeout or other non-OK status => bytes null, degraded.
- * @returns {Promise<{ bytes: Uint8Array | null, degraded: boolean }>}
+ * Fetch and decode a single PNG tile. 404 => tile null (empty radar / off-grid
+ * base). A network error, timeout, other non-OK status, or a body that is not a
+ * 256x256 PNG => tile null, degraded. Repeats are served by the fetch cache
+ * (cf.cacheTtl), so there is no separate Cache API lookup here.
+ * @param {string} u
+ * @param {number} cacheTtl
+ * @returns {Promise<{ tile: Decoded | null, degraded: boolean }>}
  */
-async function fetchTilePNG(u, cacheTtl = 300) {
-  const cache = caches.default;
-  const key = new Request(u);
-  const hit = await cache.match(key);
-  if (hit) return { bytes: new Uint8Array(await hit.arrayBuffer()), degraded: false };
-
+async function fetchTile(u, cacheTtl) {
   let r;
   try {
     r = await fetch(u, {
@@ -321,13 +334,14 @@ async function fetchTilePNG(u, cacheTtl = 300) {
   } catch {
     // Network error or timeout (AbortError) – degrade gracefully rather than
     // blanking the whole frame. The compositor renders a null tile as background.
-    return { bytes: null, degraded: true };
+    return { tile: null, degraded: true };
   }
   // 404 is normal (empty radar / off-grid base). Any other non-OK status: same
   // graceful degradation as above.
-  if (r.status === 404) return { bytes: null, degraded: false };
-  if (!r.ok) return { bytes: null, degraded: true };
-  return { bytes: new Uint8Array(await r.arrayBuffer()), degraded: false };
+  if (r.status === 404) return { tile: null, degraded: false };
+  if (!r.ok) return { tile: null, degraded: true };
+  const tile = decodeTile(new Uint8Array(await r.arrayBuffer()));
+  return { tile, degraded: tile === null };
 }
 
 // ---- small helpers ---------------------------------------------------------
@@ -400,11 +414,10 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 /**
- * Round to 4 decimal places (~11 m of lat/lon, sub-pixel at every supported
- * zoom) so jittery fixes collapse onto one /tile URL and cache entry.
+ * Round to 3 decimal places (~110 m of latitude). See handleFrames.
  * @param {number} v
  * @returns {number}
  */
-function round4(v) {
-  return Math.round(v * 1e4) / 1e4;
+function round3(v) {
+  return Math.round(v * 1e3) / 1e3;
 }
