@@ -201,29 +201,34 @@ async function handleTile(url, env, ctx) {
   // per-validtime (shorter TTL).
   const dxs = windowTileOffsets(px, DEVICE_TILE_SIZE);
   const dys = windowTileOffsets(py, DEVICE_TILE_SIZE);
-  const [baseTiles, radarTiles] = await Promise.all([
+  const [base, radar] = await Promise.all([
     fetchNeighbourhood({ x, y, dxs, dys, urlFor: (tx, ty) => baseTileURL({ z, x: tx, y: ty }), cacheTtl: 86400 }),
     fetchNeighbourhood({ x, y, dxs, dys, urlFor: (tx, ty) => radarTileURL({ z, x: tx, y: ty, basetime, validtime }), cacheTtl: 300 }),
   ]);
 
   const png = await composite({
-    baseTiles,  // {dx,dy -> Uint8Array PNG | null}
-    radarTiles, // {dx,dy -> Uint8Array PNG | null}
+    baseTiles: base.tiles,   // {dx,dy -> Uint8Array PNG | null}
+    radarTiles: radar.tiles, // {dx,dy -> Uint8Array PNG | null}
     centerPx: px,
     centerPy: py,
     out: DEVICE_TILE_SIZE,
     drawMarker: true,
   });
 
+  // A frame with a tile that failed (timeout, 5xx) still renders, with that tile
+  // as background, but it must not be cached. Otherwise one slow JMA response
+  // during rain pins "no rain" for 24 h, at the edge and in every downstream
+  // cache. A 404 is not a failure: it is JMA's "no rain here".
+  const degraded = base.degraded || radar.degraded;
   const resp = new Response(png, {
     headers: {
       "Content-Type": "image/png",
       "X-Content-Type-Options": "nosniff",
       // Per-frame images are immutable: a given validtime never changes.
-      "Cache-Control": "public, max-age=86400, immutable",
+      "Cache-Control": degraded ? "no-store" : "public, max-age=86400, immutable",
     },
   });
-  ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+  if (!degraded) ctx.waitUntil(cache.put(cacheKey, resp.clone()));
   return resp;
 }
 
@@ -272,30 +277,40 @@ function windowTileOffsets(center, out) {
   return offs;
 }
 
-/** Fetch the requested tile offsets. out["dx,dy"] = PNG bytes | null. */
+/**
+ * Fetch the requested tile offsets. tiles["dx,dy"] = PNG bytes | null.
+ * `degraded` is true when any tile failed rather than 404'd.
+ */
 async function fetchNeighbourhood({ x, y, dxs, dys, urlFor, cacheTtl }) {
   const jobs = [];
-  const out = {};
+  /** @type {Record<string, Uint8Array | null>} */
+  const tiles = {};
+  let degraded = false;
   for (const dx of dxs) {
     for (const dy of dys) {
       const u = urlFor(x + dx, y + dy);
       jobs.push(
-        fetchTilePNG(u, cacheTtl).then((buf) => {
-          out[`${dx},${dy}`] = buf; // null if 404 (no-rain / off-grid)
+        fetchTilePNG(u, cacheTtl).then((t) => {
+          tiles[`${dx},${dy}`] = t.bytes; // null if 404 (no-rain / off-grid) or failed
+          if (t.degraded) degraded = true;
         })
       );
     }
   }
   await Promise.all(jobs);
-  return out;
+  return { tiles, degraded };
 }
 
-/** Fetch a single PNG tile. 404 => null (empty radar / off-grid base). */
+/**
+ * Fetch a single PNG tile. 404 => bytes null (empty radar / off-grid base).
+ * A network error, timeout or other non-OK status => bytes null, degraded.
+ * @returns {Promise<{ bytes: Uint8Array | null, degraded: boolean }>}
+ */
 async function fetchTilePNG(u, cacheTtl = 300) {
   const cache = caches.default;
   const key = new Request(u);
   const hit = await cache.match(key);
-  if (hit) return new Uint8Array(await hit.arrayBuffer());
+  if (hit) return { bytes: new Uint8Array(await hit.arrayBuffer()), degraded: false };
 
   let r;
   try {
@@ -306,13 +321,13 @@ async function fetchTilePNG(u, cacheTtl = 300) {
   } catch {
     // Network error or timeout (AbortError) – degrade gracefully rather than
     // blanking the whole frame. The compositor renders a null tile as background.
-    return null;
+    return { bytes: null, degraded: true };
   }
   // 404 is normal (empty radar / off-grid base). Any other non-OK status: same
   // graceful degradation as above.
-  if (!r.ok) return null;
-  const buf = new Uint8Array(await r.arrayBuffer());
-  return buf;
+  if (r.status === 404) return { bytes: null, degraded: false };
+  if (!r.ok) return { bytes: null, degraded: true };
+  return { bytes: new Uint8Array(await r.arrayBuffer()), degraded: false };
 }
 
 // ---- small helpers ---------------------------------------------------------
