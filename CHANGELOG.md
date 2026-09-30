@@ -16,6 +16,20 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ### Changed
 
+- The proxy keeps recent frames, frame lists and decoded base-map tiles in
+  memory. The Cache API does nothing on `*.workers.dev`, so before this every
+  `/tile` request there rendered the frame again. A frame whose base tiles are
+  in memory renders in about 30% less CPU time. The README now explains caching
+  and the free plan's 10 ms CPU limit.
+- `/frames` rounds the rider's position to 3 decimal places (about 110 m)
+  instead of 4. The tile URLs pass through Garmin's image relay and are stored
+  on the device, so they no longer carry the exact position.
+- `/tile` rejects a `basetime`/`validtime` pair that JMA could not have
+  published: off the 5-minute grid, a lead outside 0–60 minutes, a `basetime`
+  more than 3 hours old or in the future, or an impossible date.
+- The `/tile` cache key includes a render version, so a change to the rendering
+  is not hidden behind a day of cached frames.
+- The frame lists are at most about a minute old, down from about two.
 - The widget scripts (`build.sh`, `run-sim.sh`, `deploy-device.sh` and
   `remove-device.sh`) now share one implementation in `scripts/ciq-lib.sh`. Each
   widget keeps a short wrapper with its own help text.
@@ -39,6 +53,15 @@ The proxy deploys continuously from `main` and is not versioned separately.
 - `remove-device.sh` now shows the size of each file it removes.
 - The scripts and `setup.sh` no longer mistake a container such as
   `garmin-old` for the `garmin` container.
+- **"Now" could go missing from `/frames`.** The proxy anchored on the forecast
+  list but looked up "now" in the observed list. The two are cached separately,
+  so when the observed list was a step behind, "now" was dropped, and a request
+  for one frame failed with a 502. The anchor is now the newest time both lists
+  have reached.
+- When a frame offset is missing, `/frames` now moves on to the next offset in
+  priority order, so it still returns the number of frames asked for.
+- A 200 response that is not a 256×256 PNG (for example, an HTML maintenance
+  page) no longer fails the whole frame. The proxy treats it as a failed tile.
 - **A slow radar tile could show "no rain" for 24 hours.** When JMA timed out or
   returned a server error for a tile, the proxy drew that tile as background and
   cached the frame as immutable for a day. It now serves such a frame with

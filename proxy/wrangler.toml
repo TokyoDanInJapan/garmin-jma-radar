@@ -7,14 +7,9 @@ main = "src/index.js"
 # safe.
 compatibility_date = "2026-07-01"
 
-# If you adopt @cf-wasm/photon, no extra binding is needed (it ships WASM).
-# For persistent tile storage beyond the edge cache, add an R2 bucket:
-# [[r2_buckets]]
-# binding = "TILES"
-# bucket_name = "jma-radar-tiles"
-
-# The free plan covers ~100k requests/day. Aggressive caching (see index.js)
-# keeps JMA origin hits and your request count low.
+# The free plan covers ~100k requests/day. Caching (see index.js and memo.js)
+# keeps JMA origin hits and your request count low. The edge cache only works on
+# a custom domain or route. See the README for CPU time on the free plan.
 
 # REQUIRED: shared secret gating /frames and /tile (the worker fails closed
 # without it – see authorize() in index.js). Set it as a secret, not plaintext:

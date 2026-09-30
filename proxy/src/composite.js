@@ -11,7 +11,8 @@
  *   4. Encode PNG.
  *
  * The window is rider-centred and may straddle tile boundaries, so we work over a
- * 3x3 tile neighbourhood ("dx,dy" -> PNG bytes | null). Rather than build the full
+ * 3x3 tile neighbourhood ("dx,dy" -> tile | null), of which windowTileOffsets
+ * says which cells the window touches. Rather than build the full
  * 768x768 canvas and crop it (most of which is thrown away), we iterate the
  * `out` x `out` OUTPUT pixels directly and sample the one source pixel each maps
  * to – ~30x fewer pixel ops at out=288, and we desaturate only visible base
@@ -26,8 +27,8 @@
  */
 
 import UPNG from "upng-js";
+import { TILE } from "./tilemath.js";
 
-const TILE = 256;
 const GRID = 3 * TILE; // 768
 const BG = [235, 235, 235, 255]; // light grey where a base tile is missing/off-grid
 const RADAR_OPACITY = 0.85;
@@ -55,26 +56,72 @@ const BASE_QSTEP = 255 / (BASE_LEVELS - 1);
 // heavier encode, blown memory budget. Keeping ps>0 guarantees an indexed PNG.
 const CNUM = 16;
 
-/** Decode a PNG (palette/grey/truecolour, with or without alpha) to RGBA. */
-function decodeRGBA(bytes) {
-  const img = UPNG.decode(bytes);
-  const rgba = new Uint8Array(UPNG.toRGBA8(img)[0]);
-  return { w: img.width, h: img.height, data: rgba };
+/** @typedef {{ w: number, h: number, data: Uint8Array }} Decoded RGBA tile */
+
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/**
+ * Decode an upstream tile PNG to RGBA, or return null if it is not a 256x256
+ * PNG. Upstream is JMA and GSI over HTTPS, but a 200 can still carry an HTML
+ * maintenance page or a truncated body, and UPNG.decode throws on those. The
+ * IHDR check comes first so an odd-sized image never allocates w*h*4 bytes.
+ * @param {Uint8Array} bytes
+ * @returns {Decoded | null}
+ */
+export function decodeTile(bytes) {
+  if (bytes.length < 24 || PNG_MAGIC.some((b, i) => bytes[i] !== b)) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(16) !== TILE || view.getUint32(20) !== TILE) return null;
+  try {
+    const img = UPNG.decode(bytes);
+    return { w: img.width, h: img.height, data: new Uint8Array(UPNG.toRGBA8(img)[0]) };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Decode a "dx,dy" -> PNG|null neighbourhood into a flat 3x3 array indexed by
- * cell = cy*3 + cx (cx,cy in 0..2, dx=cx-1, dy=cy-1). Missing/404 cells -> null.
- * Decoding once up front keeps the hot per-pixel loop free of string-key lookups
- * and repeated decodes.
+ * Which tile offsets (-1/0/1) a centred `out`-px window overlaps on one axis.
+ * `center` is the rider's pixel within the centre tile (0..255). The window's
+ * top-left in 3x3-grid coordinates is TILE+center-floor(out/2), the same origin
+ * composite() samples from, so the cells dropped here cannot affect the output.
+ * With out=288, center 113..143 needs all 3 columns and anything else needs 2.
+ * @param {number} center
+ * @param {number} out
+ * @returns {number[]}
+ */
+export function windowTileOffsets(center, out) {
+  const g0 = windowOrigin(center, out);
+  const g1 = g0 + out - 1;
+  const offs = [];
+  for (let c = 0; c <= 2; c++) {
+    const lo = c * TILE;
+    if (g0 <= lo + TILE - 1 && g1 >= lo) offs.push(c - 1);
+  }
+  return offs;
+}
+
+/** Top-left of the output window in 3x3-grid coordinates on one axis. */
+function windowOrigin(center, out) {
+  return TILE + center - Math.floor(out / 2);
+}
+
+/**
+ * Turn a "dx,dy" -> tile|null neighbourhood into a flat 3x3 array indexed by
+ * cell = cy*3 + cx (cx,cy in 0..2, dx=cx-1, dy=cy-1). A tile is either decoded
+ * already (the Worker decodes as it fetches) or PNG bytes (tests, scripts).
+ * Missing/404 cells -> null. Doing this once up front keeps the hot per-pixel
+ * loop free of string-key lookups and repeated decodes.
+ * @param {Record<string, Decoded | Uint8Array | null>} tiles
+ * @returns {(Decoded | null)[]}
  */
 function decodeGrid(tiles) {
   const grid = new Array(9).fill(null);
   for (const dx of [-1, 0, 1]) {
     for (const dy of [-1, 0, 1]) {
-      const bytes = tiles[`${dx},${dy}`];
-      if (!bytes) continue; // 404 / no-rain / off-grid
-      grid[(dy + 1) * 3 + (dx + 1)] = decodeRGBA(bytes);
+      const t = tiles[`${dx},${dy}`];
+      if (!t) continue; // 404 / no-rain / off-grid
+      grid[(dy + 1) * 3 + (dx + 1)] = t instanceof Uint8Array ? decodeTile(t) : t;
     }
   }
   return grid;
@@ -99,23 +146,23 @@ function marker(dst, out, cx, cy, r = 4) {
 
 /**
  * @param {Object} args
- * @param {Object} args.baseTiles  "dx,dy" -> Uint8Array PNG | null (GSI base map)
- * @param {Object} args.radarTiles "dx,dy" -> Uint8Array PNG | null (JMA radar)
+ * @param {Record<string, Decoded | Uint8Array | null>} args.baseTiles  "dx,dy" -> GSI base map tile
+ * @param {Record<string, Decoded | Uint8Array | null>} args.radarTiles "dx,dy" -> JMA radar tile
  * @param {number} args.centerPx   rider x within the centre tile (0..255)
  * @param {number} args.centerPy   rider y within the centre tile (0..255)
  * @param {number} args.out        output square size in px
  * @param {boolean} args.drawMarker
- * @returns {Promise<Uint8Array>} PNG bytes
+ * @returns {Uint8Array} PNG bytes
  */
-export async function composite({ baseTiles, radarTiles, centerPx, centerPy, out, drawMarker }) {
+export function composite({ baseTiles, radarTiles, centerPx, centerPy, out, drawMarker }) {
   const base = decodeGrid(baseTiles);
   const radar = decodeGrid(radarTiles);
 
   // Top-left of the output window in 3x3-grid coordinates (centre tile starts at
   // TILE). Same window the old code cropped from the full canvas.
   const half = Math.floor(out / 2);
-  const gx0 = TILE + centerPx - half;
-  const gy0 = TILE + centerPy - half;
+  const gx0 = windowOrigin(centerPx, out);
+  const gy0 = windowOrigin(centerPy, out);
 
   const dst = new Uint8Array(out * out * 4);
   for (let oy = 0; oy < out; oy++) {

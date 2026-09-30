@@ -4,7 +4,8 @@
  * JMA radar tiles use the standard z/x/y scheme (256px tiles), same as OSM/GSI.
  */
 
-const TILE = 256;
+/** Slippy tile size in px. JMA, GSI and the compositor all use 256. */
+export const TILE = 256;
 
 /**
  * Convert lon/lat -> integer tile (x,y) at zoom z, plus the pixel position

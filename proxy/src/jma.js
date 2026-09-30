@@ -16,6 +16,8 @@
  * overlay a GSI base map. 404 is normal for empty tiles.
  */
 
+import { targetTimes } from "./memo.js";
+
 const JMA_BASE = "https://www.jma.go.jp/bosai/jmatile/data/nowc";
 // N1 = observed/analysis frames (basetime===validtime).
 // N2 = forecast frames (validtime>basetime), out to +60 min in 5-min steps.
@@ -37,24 +39,28 @@ const FORECAST_URL = `${JMA_BASE}/targetTimes_N2.json`;
 const FRAME_PRIORITY_MIN = [0, 60, 30, 45, 15, -15];
 const MAX_FRAMES = FRAME_PRIORITY_MIN.length; // 6 - device memory ceiling
 
+const MINUTE = 60 * 1000;
+const STEP_MS = 5 * MINUTE;        // JMA's native frame grid
+const MAX_LEAD_MS = 60 * MINUTE;   // hrpns forecasts run to +60 min
+const MAX_AGE_MS = 3 * 60 * MINUTE; // older than any frame list a device can hold
+const CLOCK_SKEW_MS = 5 * MINUTE;
+
 /**
  * Fetch one targetTimes file and normalise to [{basetime, validtime}].
  * `observedOnly` keeps analysis frames (basetime===validtime). Otherwise keeps
- * forecast frames (validtime>basetime). Edge-cached ~60s so we don't refetch
- * per device.
+ * forecast frames (validtime>basetime).
+ *
+ * Two cache layers, both short: the fetch is edge-cached for 30 s (shared by
+ * every isolate in the colo), and the normalised list is kept in memory for
+ * 30 s. There used to be a third, Cache API layer at 60 s on top of a 60 s
+ * fetch cache, so a new JMA frame could take two minutes to appear.
  */
-async function fetchTimes(url, ctx, observedOnly) {
-  const cache = caches.default;
-  // Cache the *normalised* list under a synthetic key (same radar.invalid
-  // pattern as handleTile's). A fragment ("url#cache") is not a safe
-  // discriminator: the Cache API may strip it, which would collide this entry
-  // with the raw upstream response cached by cf.cacheEverything.
-  const key = new Request(`https://radar.invalid/targetTimes?u=${encodeURIComponent(url)}`);
-  const hit = await cache.match(key);
-  if (hit) return await hit.json();
+async function fetchTimes(url, observedOnly) {
+  const hit = targetTimes.get(url);
+  if (hit) return hit;
 
   const r = await fetch(url, {
-    cf: { cacheTtl: 60, cacheEverything: true },
+    cf: { cacheTtl: 30, cacheEverything: true },
     signal: AbortSignal.timeout(5000), // don't hang the request on a stalled origin
   });
   if (!r.ok) throw new Error(`targetTimes ${r.status}`);
@@ -64,63 +70,92 @@ async function fetchTimes(url, ctx, observedOnly) {
   if (!Array.isArray(raw)) throw new Error("targetTimes: unexpected shape");
 
   const normalized = raw
-    .filter((t) => t.basetime && t.validtime
+    .filter((t) => t && isJmaTime(t.basetime) && isJmaTime(t.validtime)
       && (observedOnly ? t.basetime === t.validtime : t.validtime > t.basetime))
     .map((t) => ({ basetime: t.basetime, validtime: t.validtime }));
 
   // Some responses are newest-first. Sort oldest-first for playback.
   normalized.sort((a, b) => (a.validtime < b.validtime ? -1 : 1));
 
-  const resp = new Response(JSON.stringify(normalized), {
-    headers: { "Content-Type": "application/json", "Cache-Control": "max-age=60" },
-  });
-  ctx.waitUntil(cache.put(key, resp.clone()));
+  targetTimes.set(url, normalized);
   return normalized;
+}
+
+/** A well-formed "YYYYMMDDHHmmss" that names a real instant (no month 13). */
+function isJmaTime(s) {
+  return typeof s === "string" && /^\d{14}$/.test(s) && formatJmaTime(parseJmaTime(s)) === s;
+}
+
+/**
+ * Whether a /tile basetime/validtime pair could be a real hrpns frame: both real
+ * instants on the 5-minute grid, a lead of 0 to +60 min, and a basetime from the
+ * last 3 hours (with a little clock skew). The regex in index.js already blocks
+ * path injection. This stops a token holder from minting unlimited distinct
+ * cache keys, each worth up to 18 upstream fetches, and from requesting a future
+ * frame before JMA publishes it, which would cache as "no rain".
+ * @param {string} basetime
+ * @param {string} validtime
+ * @param {number} nowMs
+ * @returns {boolean}
+ */
+export function isPlausibleFrame(basetime, validtime, nowMs) {
+  if (!isJmaTime(basetime) || !isJmaTime(validtime)) return false;
+  const b = parseJmaTime(basetime);
+  const lead = parseJmaTime(validtime) - b;
+  const age = nowMs - b;
+  return b % STEP_MS === 0 && lead % STEP_MS === 0
+    && lead >= 0 && lead <= MAX_LEAD_MS
+    && age >= -CLOCK_SKEW_MS && age <= MAX_AGE_MS;
 }
 
 /**
  * Assemble the -15 .. +60 min frame set (15-min steps). Past/now frames come
- * from observed (N1), forecast frames from N2. The two share an anchor because
- * N2's basetime is the latest analysis time (= newest observed frame). `count`
- * caps how many frames to return, chosen by FRAME_PRIORITY_MIN (now first, then
- * +60, ...) and clamped to [1, MAX_FRAMES]. Returns ordered
+ * from observed (N1), forecast frames from N2. `count` caps how many frames to
+ * return, clamped to [1, MAX_FRAMES]. Offsets are taken in FRAME_PRIORITY_MIN
+ * order (now first, then +60, ...), skipping any JMA doesn't currently have and
+ * moving on to the next, until `count` are found. Returns
  * [{basetime, validtime, offset}] oldest-first (offset = minutes from the
- * analysis time), silently skipping any offset JMA doesn't currently have a
- * frame for.
+ * anchor analysis time).
+ * @param {number} [count]
+ * @returns {Promise<Array<{ basetime: string, validtime: string, offset: number }>>}
  */
-export async function getFrameTimes(env, ctx, count = MAX_FRAMES) {
+export async function getFrameTimes(count = MAX_FRAMES) {
   // Enforce the device memory ceiling regardless of what the client asks for. A
   // 0/NaN/negative count falls back to the full set.
   const want = Math.min(MAX_FRAMES, Math.max(1, Math.floor(count) || MAX_FRAMES));
-  // The `want` highest-priority offsets, played back oldest-first.
-  const offsets = FRAME_PRIORITY_MIN.slice(0, want).sort((a, b) => a - b);
 
   const [observed, forecast] = await Promise.all([
-    fetchTimes(OBSERVED_URL, ctx, true),
-    fetchTimes(FORECAST_URL, ctx, false),
+    fetchTimes(OBSERVED_URL, true),
+    fetchTimes(FORECAST_URL, false),
   ]);
 
-  // Anchor "now" on the forecast basetime (the latest analysis). Fall back to
-  // the newest observed validtime if the forecast list is unavailable.
-  const anchorStr = forecast.length ? forecast[0].basetime
-    : observed.length ? observed[observed.length - 1].validtime
-    : null;
-  if (anchorStr == null) throw new Error("no target times available");
-  const anchorMs = parseJmaTime(anchorStr);
+  // N2 should hold one basetime, the latest analysis. If it ever holds more,
+  // keep the newest run, so one frame set never mixes two forecasts.
+  const fcBase = forecast.reduce((m, t) => (t.basetime > m ? t.basetime : m), "");
+  const newestObs = observed.length ? observed[observed.length - 1].validtime : "";
+
+  // Anchor "now" on the latest analysis BOTH lists have reached. The two files
+  // are fetched and cached separately, so one can be a 5-min step ahead of the
+  // other. Anchoring on N2 alone dropped "now" whenever N1 lagged, and a
+  // count=1 request then failed with a 502.
+  const anchors = [fcBase, newestObs].filter(Boolean).sort();
+  if (anchors.length === 0) throw new Error("no target times available");
+  const anchorMs = parseJmaTime(anchors[0]);
 
   // Index by validtime so each offset is an O(1) lookup.
   const obsByValid = new Map(observed.map((t) => [t.validtime, t]));
-  const fcByValid = new Map(forecast.map((t) => [t.validtime, t]));
+  const fcByValid = new Map(forecast.filter((t) => t.basetime === fcBase).map((t) => [t.validtime, t]));
 
   const out = [];
-  for (const off of offsets) {
-    const target = formatJmaTime(anchorMs + off * 60000);
+  for (const off of FRAME_PRIORITY_MIN) {
+    if (out.length === want) break;
+    const target = formatJmaTime(anchorMs + off * MINUTE);
     // <=0 is observed/analysis (basetime===validtime), and >0 is forecast.
     const t = off > 0 ? fcByValid.get(target) : obsByValid.get(target);
     if (t) out.push({ basetime: t.basetime, validtime: t.validtime, offset: off });
   }
   if (out.length === 0) throw new Error("no frames in target window");
-  return out;
+  return out.sort((a, b) => a.offset - b.offset);
 }
 
 /**

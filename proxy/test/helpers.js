@@ -1,4 +1,5 @@
 import UPNG from "upng-js";
+import { clearMemos } from "../src/memo.js";
 
 // Shared stubs and fixtures for the worker test suites: a caches.default that
 // always misses, a fetch that serves canned targetTimes JSON + a solid PNG for
@@ -33,9 +34,13 @@ export function solidPng([r, g, b, a]) {
 }
 export const TILE_PNG = solidPng([120, 120, 120, 255]);
 
-/** Install a caches.default stub that always misses (so fetch is exercised). */
+/**
+ * Install a caches.default stub that always misses (so fetch is exercised), and
+ * empty the Worker's in-memory caches for the same reason.
+ */
 export function stubCaches() {
   globalThis.caches = { default: { match: async () => undefined, put: async () => {} } };
+  clearMemos();
 }
 
 /**
@@ -43,6 +48,7 @@ export function stubCaches() {
  * else -> forecast). Any other URL (tiles) gets TILE_PNG.
  */
 export function stubFetch(observed = OBSERVED, forecast = FORECAST) {
+  clearMemos();
   globalThis.fetch = async (url) => {
     const u = String(url);
     if (u.includes("targetTimes")) {

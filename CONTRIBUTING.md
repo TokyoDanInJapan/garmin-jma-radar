@@ -65,7 +65,7 @@ the code.
 and will change without notice. One file should absorb that.
 
 **The device tile size is a cross-project contract.** `DEVICE_TILE_SIZE` (288) is
-duplicated in `proxy/src/index.js`, `radar-widget/source/RadarView.mc` and
+duplicated in `proxy/src/index.js`, `radar-widget/source/FramePipeline.mc` and
 `speedtest-widget/source/SpeedTestView.mc`. Change all three together.
 
 **Frame count is bounded by device memory.** `MAX_FRAMES = 6` in `jma.js` is not
