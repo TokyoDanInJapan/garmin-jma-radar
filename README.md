@@ -192,7 +192,7 @@ dashboard instead. Add a **WAF → Rate limiting** rule on
 
 ### Install the Connect IQ SDK
 
-On Ubuntu 24.10 or newer, run this from the repo root:
+On Ubuntu 24.10 or newer, or on Omarchy, run this from the repo root:
 
 ```bash
 ./setup.sh      # safe to run again: container + SDK + simulator libs + signing key

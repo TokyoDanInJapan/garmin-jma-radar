@@ -18,8 +18,8 @@ deliberately keeps no state beyond edge cache entries keyed on tile geometry.
 - **Proxy only** (`proxy/`): Node 22 or newer. Run `cd proxy && npm ci`. You need
   no Garmin toolchain.
 - **Widgets** (`radar-widget/`, `speedtest-widget/`): see
-  [docs/connect-iq-sdk.md](docs/connect-iq-sdk.md). On Ubuntu 24.10 or newer,
-  `./setup.sh` from the repo root does everything.
+  [docs/connect-iq-sdk.md](docs/connect-iq-sdk.md). On Ubuntu 24.10 or newer, or
+  on Omarchy, `./setup.sh` from the repo root does everything.
 
 Install the pre-commit hooks once per clone. They run the same gitleaks,
 shellcheck and actionlint checks that CI runs:
