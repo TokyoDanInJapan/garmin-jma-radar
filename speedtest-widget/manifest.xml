@@ -2,7 +2,7 @@
 <!--
   Connect IQ manifest for the Proxy Speed Test widget - a diagnostic companion to
   the Rain Radar widget. It repeatedly times a /frames JSON request (makeWebRequest)
-  and a /tile image request (makeImageRequest) against the same proxy, to compare
+  and a /speedtest image request (makeImageRequest) against the same proxy, to compare
   the two transport paths in real time (the image path goes via Garmin's image
   service and is the one that struggles over Bluetooth).
 

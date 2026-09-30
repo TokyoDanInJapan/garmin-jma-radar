@@ -22,12 +22,12 @@ const TEST_LON     = 139.767;
 const TEST_Z       = 10;
 // Requested image size: the same the radar widget uses, so the timings mirror
 // it. A cross-project contract – must match DEVICE_TILE_SIZE in the radar
-// widget's RadarView.mc and in proxy/src/index.js.
+// widget's FramePipeline.mc and in proxy/src/index.js.
 const DEVICE_TILE_SIZE = 288;
 
 // Test phases. A cycle runs WEB then IMG, so exactly one request is ever in
-// flight (single-flight) – which is what lets mStartMs/mAwaiting be shared
-// across both phases instead of tracked per-request.
+// flight (single-flight) – which is what lets mStartMs be shared across both
+// phases instead of tracked per-request.
 const PH_IDLE = 0;
 const PH_WEB  = 1;  // makeWebRequest /frames      (the path that works over BLE)
 const PH_IMG  = 2;  // makeImageRequest /speedtest (routed via Garmin's image service)
@@ -53,9 +53,15 @@ class SpeedTestView extends WatchUi.View {
     hidden var mPhase = PH_IDLE;  // PH_IDLE / PH_WEB / PH_IMG
     hidden var mStartMs = 0;      // System.getTimer() when the in-flight request began
     hidden var mIdleTicks = 0;    // ticks waited since going idle (paces the next cycle)
-    hidden var mAwaiting = false; // true while a request is outstanding, and guards stale
-                                  // (post-timeout) callbacks from double-recording
+    // Sequence number of the request in flight. Each callback carries the number
+    // of the request that started it (SpeedCallback), and only the current one
+    // counts. A flag alone was not enough: after a tap or a timeout the next
+    // request starts within a second, so an old request's late callback passed
+    // the check and was recorded against the new one, with the wrong phase and
+    // a time measured from the wrong start.
+    hidden var mSeq = 0;
     hidden var mCycles = 0;
+    hidden var mSettingsMsg = null; // why the settings can't work, or null
 
     // Per-path stats: n=attempts, ok=200s, last ms + last code, and min/avg/max
     // over successful pulls (avg = sum/ok). min = -1 until the first success.
@@ -80,37 +86,60 @@ class SpeedTestView extends WatchUi.View {
         // never returns null here – read directly (no nullable fallback needed).
         mProxyBase = Util.stripSlash(Application.Properties.getValue("proxyBase").toString());
         mProxyKey  = Application.Properties.getValue("proxyKey").toString();
+        mSettingsMsg = Util.settingsError(mProxyBase, mProxyKey);
     }
 
+    // New settings make the old numbers meaningless, so start a fresh run.
     function onSettingsChanged() {
         readSettings();
+        if (mTick != null) { resetStats(); }
     }
 
     function onShow() {
-        if (mTick == null) {
-            mTick = new Timer.Timer();
-            mTick.start(method(:onTick), TICK_MS, true);
-        }
         resetStats();   // each showing starts a fresh MAX_CYCLES run
     }
 
-    // Stop the timer so nothing keeps running while the widget is off-screen.
+    // Stop the timer and drop the request in flight, so nothing keeps running
+    // while the widget is off-screen.
     function onHide() {
-        if (mTick != null) { mTick.stop(); mTick = null; }
+        stopTick();
+        abandon();
     }
 
     // Clear all collected stats and start a fresh run on the next tick. Bound to
     // a tap (see the delegate), and used by onShow – so a tap both resets the
-    // numbers and re-runs the bounded MAX_CYCLES pass. Any in-flight request is
-    // abandoned cleanly (mAwaiting=false makes its late callback a no-op).
+    // numbers and re-runs the bounded MAX_CYCLES pass.
     function resetStats() as Void {
+        abandon();
         mCycles = 0;
-        mPhase = PH_IDLE;
-        mAwaiting = false;
         mIdleTicks = GAP_TICKS;   // start the first cycle on the next tick
         mWebN = 0; mWebOk = 0; mWebLast = 0; mWebCode = 0; mWebMin = -1; mWebMax = 0; mWebSum = 0;
         mImgN = 0; mImgOk = 0; mImgLast = 0; mImgCode = 0; mImgMin = -1; mImgMax = 0; mImgSum = 0;
+        // Nothing to run without usable settings, so don't tick.
+        if (mSettingsMsg == null) { startTick(); } else { stopTick(); }
         WatchUi.requestUpdate();
+    }
+
+    // Abandon the request in flight: bump the sequence number so its callback
+    // is ignored, and cancel it so it stops using the one BLE link that the next
+    // measurement needs. The bump comes first, in case the cancel calls the
+    // callback straight away.
+    hidden function abandon() as Void {
+        var busy = (mPhase != PH_IDLE);
+        mSeq += 1;
+        mPhase = PH_IDLE;
+        if (busy) { Communications.cancelAllRequests(); }
+    }
+
+    hidden function startTick() as Void {
+        if (mTick == null) {
+            mTick = new Timer.Timer();
+            mTick.start(method(:onTick), TICK_MS, true);
+        }
+    }
+
+    hidden function stopTick() as Void {
+        if (mTick != null) { mTick.stop(); mTick = null; }
     }
 
     // ---- Master tick -------------------------------------------------------
@@ -118,44 +147,48 @@ class SpeedTestView extends WatchUi.View {
     // watchdog for an in-flight request that never calls back.
     function onTick() as Void {
         if (mPhase == PH_IDLE) {
-            // Run finished: the "done" screen is static, so stop repainting
-            // (and don't schedule more cycles) until a tap/onShow resets.
-            if (mCycles >= MAX_CYCLES) { return; }
+            // Run finished: the "done" screen is static, so stop the timer
+            // until a tap/onShow resets.
+            if (mCycles >= MAX_CYCLES) {
+                stopTick();
+                WatchUi.requestUpdate();
+                return;
+            }
             mIdleTicks += 1;
-            // Start the next cycle once the gap has elapsed, provided a proxy
-            // URL is set.
-            if (mProxyBase.length() > 0 && mIdleTicks >= GAP_TICKS) {
+            if (mIdleTicks >= GAP_TICKS) {
                 mCycles += 1;
                 startWeb();
             }
         } else if (System.getTimer() - mStartMs >= TIMEOUT_MS) {
             // No callback within the budget: record a timeout (code 0) and move
-            // on. mAwaiting=false makes the eventual late callback a no-op.
-            mAwaiting = false;
-            record(mPhase == PH_IMG, TIMEOUT_MS, 0);
-            mPhase = PH_IDLE;
+            // on. abandon() makes the eventual late callback a no-op.
+            var wasImg = (mPhase == PH_IMG);
+            abandon();
+            record(wasImg, TIMEOUT_MS, 0);
             mIdleTicks = 0;
         }
         WatchUi.requestUpdate();
     }
 
     // ---- Step 1: /frames via makeWebRequest --------------------------------
+    // Sent like the radar sends it (key in the X-Proxy-Key header), so the WEB
+    // timings match what the radar sees.
     function startWeb() as Void {
         mPhase = PH_WEB;
         mStartMs = System.getTimer();
-        mAwaiting = true;
+        mSeq += 1;
         var url = mProxyBase + "/frames";
-        var params = { "lat" => TEST_LAT, "lon" => TEST_LON, "z" => TEST_Z, "n" => 1, "key" => mProxyKey };
+        var params = { "lat" => TEST_LAT, "lon" => TEST_LON, "z" => TEST_Z, "n" => 1 };
         var options = {
             :method => Communications.HTTP_REQUEST_METHOD_GET,
-            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON,
+            :headers => { "X-Proxy-Key" => mProxyKey }
         };
-        Communications.makeWebRequest(url, params, options, method(:onFrames));
+        Communications.makeWebRequest(url, params, options, new SpeedCallback(self, mSeq).method(:onWeb));
     }
 
-    function onFrames(code as Lang.Number, data as Lang.Dictionary or Lang.String or PersistedContent.Iterator or Null) as Void {
-        if (!mAwaiting) { return; }   // already timed out, so ignore the late callback
-        mAwaiting = false;
+    function onFrames(seq as Lang.Number, code as Lang.Number) as Void {
+        if (seq != mSeq || mPhase != PH_WEB) { return; }   // abandoned: late, reset or timed out
         record(false, System.getTimer() - mStartMs, code);
 
         // Chain into the image pull. It fetches the fixed /speedtest asset, so
@@ -171,7 +204,7 @@ class SpeedTestView extends WatchUi.View {
     function startImg() as Void {
         mPhase = PH_IMG;
         mStartMs = System.getTimer();
-        mAwaiting = true;
+        mSeq += 1;
 
         var params = { "key" => mProxyKey }; // proxy also accepts X-Proxy-Key
         var options = {
@@ -180,13 +213,13 @@ class SpeedTestView extends WatchUi.View {
             // Proxy already delivers a small palette PNG. Don't re-dither.
             :dithering => Communications.IMAGE_DITHERING_NONE
         };
-        Communications.makeImageRequest(mProxyBase + "/speedtest", params, options, method(:onImage));
+        Communications.makeImageRequest(mProxyBase + "/speedtest", params, options,
+            new SpeedCallback(self, mSeq).method(:onImg));
     }
 
     // The image itself is discarded – we only wanted the transfer time.
-    function onImage(code as Lang.Number, data as Graphics.BitmapReference or WatchUi.BitmapResource or Null) as Void {
-        if (!mAwaiting) { return; }   // already timed out, so ignore the late callback
-        mAwaiting = false;
+    function onImage(seq as Lang.Number, code as Lang.Number) as Void {
+        if (seq != mSeq || mPhase != PH_IMG) { return; }   // abandoned: late, reset or timed out
         record(true, System.getTimer() - mStartMs, code);
         mPhase = PH_IDLE;
         mIdleTicks = 0;
@@ -242,7 +275,13 @@ class SpeedTestView extends WatchUi.View {
 
         // Big live status: which request is in flight and a running stopwatch,
         // or "done" once the run's cycle cap is reached (the averages below are
-        // then final), or "idle" between cycles / before the first.
+        // then final), or "idle" between cycles / before the first. Unusable
+        // settings replace all of it with what to fix.
+        if (mSettingsMsg != null) {
+            dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Graphics.FONT_SMALL, mSettingsMsg, Graphics.TEXT_JUSTIFY_CENTER);
+            return;
+        }
         var live;
         if (mPhase == PH_WEB) { live = "WEB  " + Util.secsStr(System.getTimer() - mStartMs); }
         else if (mPhase == PH_IMG) { live = "IMG  " + Util.secsStr(System.getTimer() - mStartMs); }
@@ -294,5 +333,25 @@ class SpeedTestView extends WatchUi.View {
             Graphics.TEXT_JUSTIFY_LEFT);
         y += fT;
         return y;
+    }
+}
+
+// Binds a request's sequence number to its callback, since the Communications
+// callbacks carry no context of their own.
+class SpeedCallback {
+    hidden var mView;
+    hidden var mSeq;
+
+    function initialize(view, seq) {
+        mView = view;
+        mSeq = seq;
+    }
+
+    function onWeb(code as Lang.Number, data as Lang.Dictionary or Lang.String or PersistedContent.Iterator or Null) as Void {
+        mView.onFrames(mSeq, code);
+    }
+
+    function onImg(code as Lang.Number, data as Graphics.BitmapReference or WatchUi.BitmapResource or Null) as Void {
+        mView.onImage(mSeq, code);
     }
 }
