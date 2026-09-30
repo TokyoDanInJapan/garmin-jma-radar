@@ -16,6 +16,24 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ### Changed
 
+- The radar widget fetches a new frame list every 10 minutes while it stays
+  open, instead of playing the first list for as long as it is open. The current
+  frame stays on screen until the first new frame arrives.
+- Both widgets send the proxy key for `/frames` in the `X-Proxy-Key` header, so
+  it stays out of request URLs. They also round the position to 3 decimal places
+  before they send it.
+- Both widgets check the settings before they send anything. The `YOURNAME`
+  placeholder URL, an empty key or an `http://` URL (other than `localhost`)
+  now shows what to fix, instead of failing a request.
+- Error messages name the problem: `Phone not connected`, `Timed out`,
+  `Image too large`, `Proxy URL must be https` and `Outside Japan?`. Before, every
+  transport error showed `No phone connection`, even on Wi-Fi.
+- The radar widget stops redrawing when it shows a single frame, instead of
+  redrawing it twice a second for as long as it is open. The speed-test widget
+  stops its timer when a run is done or the settings are unusable.
+- `RadarView.mc` is split into `FrameListClient` (the `/frames` request),
+  `RadarRenderer` (drawing and button geometry) and the view itself. Playback,
+  settings and response checks are now pure helpers with unit tests.
 - The proxy keeps recent frames, frame lists and decoded base-map tiles in
   memory. The Cache API does nothing on `*.workers.dev`, so before this every
   `/tile` request there rendered the frame again. A frame whose base tiles are
@@ -53,6 +71,27 @@ The proxy deploys continuously from `main` and is not versioned separately.
 - `remove-device.sh` now shows the size of each file it removes.
 - The scripts and `setup.sh` no longer mistake a container such as
   `garmin-old` for the `garmin` container.
+- **The radar widget kept working after it was hidden.** It stopped its timers
+  but not the load, so the next image callback requested another image and
+  restarted the timer. A settings change in Garmin Connect also started GPS
+  and network requests for a hidden widget. Both now wait until the widget is
+  shown again.
+- **A late `/frames` response could replace a newer one.** After a zoom change
+  or a reload, the old request's answer could still be accepted, so frames for
+  the old zoom showed, or an old `401` flagged a key that had been fixed. Each
+  request now has a sequence number.
+- The radar widget checks the `/frames` response before it uses it. A body of
+  the wrong shape shows `Bad server response` instead of crashing, and a proxy
+  that returns more frames than asked for can no longer run the device out of
+  memory.
+- Responses that are too large (`-402`, `-403`) or need https (`-1001`) are no
+  longer retried. Over Bluetooth, each retry could take 90 seconds.
+- A GPS fix that arrives after `No GPS fix` now clears the failure, and a
+  last-known position with no accuracy is no longer used.
+- **The speed-test widget could record a result against the wrong request.**
+  After a tap or a timeout, an old request's late callback was counted as the
+  new one. Callbacks now carry a sequence number, and an abandoned request is
+  cancelled. A settings change now starts a fresh run.
 - **"Now" could go missing from `/frames`.** The proxy anchored on the forecast
   list but looked up "now" in the observed list. The two are cached separately,
   so when the observed list was a step behind, "now" was dropped, and a request
