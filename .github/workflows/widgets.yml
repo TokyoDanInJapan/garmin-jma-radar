@@ -102,11 +102,6 @@ jobs:
           done
           exit $status
 
-      # These .prg files get uploaded as workflow artifacts below. Same check the
-      # release runs before publishing – a credential must not reach either.
-      - name: Assert no proxy credential is baked in
-        run: .github/scripts/assert-no-credentials.sh radar-widget/bin speedtest-widget/bin
-
       # (:test) functions are compiled in only by --unit-test, so this is a
       # second build. It is not held to the zero-warning bar above: the test
       # sources trip "cannot determine container type" on their fixture literals.
@@ -128,8 +123,19 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Upload build artifacts
+      # Last step before the upload, so it also covers ci-test.prg. Same check the
+      # release runs before publishing – a credential must not reach either.
+      # always(): a failing unit test must not skip the check, since the upload
+      # below still runs then.
+      - name: Assert no proxy credential is baked in
+        id: creds
         if: always()
+        run: .github/scripts/assert-no-credentials.sh radar-widget/bin speedtest-widget/bin
+
+      # Only upload what the check above passed. Plain always() would upload the
+      # very artifacts it had just flagged.
+      - name: Upload build artifacts
+        if: always() && steps.creds.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: widget-prgs
