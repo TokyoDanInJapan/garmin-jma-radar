@@ -96,7 +96,13 @@ mkdir -p "$(dirname "$output")"
 # --- Inject secrets from .env (optional) ------------------------------------
 props="$here/resources/shared/properties.xml"
 props_backup=""
-restore_props() { [[ -n "$props_backup" && -f "$props_backup" ]] && mv -f "$props_backup" "$props"; }
+# An if, not `[[ ]] && mv`: as the EXIT trap's last command, a false test would
+# become the script's exit status and fail every build that bakes nothing.
+restore_props() {
+    if [[ -n "$props_backup" && -f "$props_backup" ]]; then
+        mv -f "$props_backup" "$props"
+    fi
+}
 trap restore_props EXIT
 
 if [[ -f "$envfile" ]]; then

@@ -14,6 +14,22 @@ The proxy deploys continuously from `main` and is not versioned separately.
   the script installs `podman` and `distrobox` with `pacman`. The container is
   the same Ubuntu 22.04 container as on Ubuntu.
 
+### Fixed
+
+- **A slow radar tile could show "no rain" for 24 hours.** When JMA timed out or
+  returned a server error for a tile, the proxy drew that tile as background and
+  cached the frame as immutable for a day. It now serves such a frame with
+  `no-store` and does not cache it. A 404 still counts as "no rain" and is
+  cached as before.
+- **The gitleaks CI job could print the proxy token in the public log.** The two
+  custom rules did not set `secretGroup`, so gitleaks redacted the keyword and
+  printed the value. Both rules now report the value as the secret.
+- **CI uploaded widget builds even when the credential check failed.** The
+  upload ran with `if: always()`. The check now runs last, also covers the
+  unit-test build, and the upload runs only when the check passes.
+- `speedtest-widget/build.sh` exited with status 1 after every build that did
+  not bake a key, so `run-sim.sh` stopped before it started the simulator.
+
 ## [1.0.1] - 2026-09-13
 
 ### Changed
