@@ -8,23 +8,13 @@ The proxy deploys continuously from `main` and is not versioned separately.
 
 ## Unreleased
 
+## [1.1.0] - 2026-09-30
+
 ### Added
 
 - `setup.sh` now runs on Omarchy and other Arch-based systems. On these hosts,
   the script installs `podman` and `distrobox` with `pacman`. The container is
   the same Ubuntu 22.04 container as on Ubuntu.
-
-### Security
-
-- CI checks every download before it runs it: the Connect IQ SDK, the device
-  profiles, actionlint and gitleaks by SHA-256, and the `ubuntu:22.04`
-  container by digest. `npm ci` runs with `--ignore-scripts`.
-- The release job reads `GARMIN_DEVELOPER_KEY` from a `release` environment,
-  writes it owner-only to the job's temp folder and deletes it afterwards. It
-  builds from a fresh, checked SDK download instead of the shared cache.
-- Releases publish a `SHA256SUMS` file and a build provenance attestation.
-- gitleaks no longer skips `*.example` files, and `.gitignore` covers `*.der`,
-  `*.pem` and `dist/`.
 
 ### Changed
 
@@ -146,6 +136,18 @@ The proxy deploys continuously from `main` and is not versioned separately.
 - `speedtest-widget/build.sh` exited with status 1 after every build that did
   not bake a key, so `run-sim.sh` stopped before it started the simulator.
 
+### Security
+
+- CI checks every download before it runs it: the Connect IQ SDK, the device
+  profiles, actionlint and gitleaks by SHA-256, and the `ubuntu:22.04`
+  container by digest. `npm ci` runs with `--ignore-scripts`.
+- The release job reads `GARMIN_DEVELOPER_KEY` from a `release` environment,
+  writes it owner-only to the job's temp folder and deletes it afterwards. It
+  builds from a fresh, checked SDK download instead of the shared cache.
+- Releases publish a `SHA256SUMS` file and a build provenance attestation.
+- gitleaks no longer skips `*.example` files, and `.gitignore` covers `*.der`,
+  `*.pem` and `dist/`.
+
 ## [1.0.1] - 2026-09-13
 
 ### Changed
@@ -255,5 +257,6 @@ The proxy deploys continuously from `main` and is not versioned separately.
   `pull_request`, so the `test` check reports on every PR. The check can then be
   required without deadlocking PRs that do not touch `proxy/**`.
 
+[1.1.0]: https://github.com/TokyoDanInJapan/garmin-jma-radar/releases/tag/v1.1.0
 [1.0.1]: https://github.com/TokyoDanInJapan/garmin-jma-radar/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TokyoDanInJapan/garmin-jma-radar/releases/tag/v1.0.0
