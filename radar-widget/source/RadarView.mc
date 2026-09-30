@@ -1,11 +1,8 @@
 using Toybox.WatchUi;
-using Toybox.Graphics;
-using Toybox.Communications;
 using Toybox.Position;
 using Toybox.Timer;
 using Toybox.Application;
 using Toybox.Lang;
-using Toybox.PersistedContent;
 using Toybox.System;
 
 // ---- CONFIG ----------------------------------------------------------------
@@ -13,24 +10,25 @@ using Toybox.System;
 // (resources/shared/settings.xml -> properties.xml), editable from Garmin Connect with
 // no rebuild. Only the fixed playback tuning stays as consts here. The image
 // pipeline's tuning (retries, transfer watchdog, tile size) lives with the
-// pipeline in FramePipeline.mc.
+// pipeline in FramePipeline.mc, and the /frames watchdog in FrameListClient.mc.
 const FRAME_MS = 500;       // ms per frame during playback, and the master tick interval
 // Over Bluetooth each tile is ~30x slower (Garmin's image service), so cap the
 // number of frames fetched to keep the animation usable. On Wi-Fi (the fast
 // direct path) we load the full frameCount setting. See effectiveFrameCount().
 const BLE_FRAME_CAP = 3;
 const GPS_TIMEOUT_MS = 20000; // give up waiting for a one-shot fix after this
-// Watchdog for the /frames request, in master ticks (FRAME_MS each). Over
-// Bluetooth a request is proxied through the phone and a hung transfer can fail
-// to invoke its callback at all. Without a guard that would hang "Loading
-// radar..." forever. /frames is small JSON over makeWebRequest and returns
-// quickly, so it only needs a short "dead link" guard. (The image requests have
-// their own, much longer watchdog – see FramePipeline.mc.)
+// Fetch a fresh frame list this long after a load completes, while the widget
+// stays open. JMA publishes every 5 minutes, but over Bluetooth a load costs
+// ~30 s of transfers per frame, so every 10 minutes balances fresh radar
+// against battery.
+const REFRESH_MS = 10 * 60 * 1000;
 //
 // NOTE: Connect IQ caps the number of concurrent Timer.Timer objects (~3), so a
-// per-request watchdog timer is not viable. Instead one master timer (mTickTimer)
-// drives playback, the busy animation, AND the watchdogs by counting ticks.
-const FRAMES_TIMEOUT_TICKS = 30; // 30 * FRAME_MS = 15000 ms
+// per-request watchdog timer is not viable. One master timer (mTickTimer)
+// drives playback, the busy animation AND the watchdogs by counting ticks. The
+// GPS timer only runs before the first fix, and the refresh timer only after a
+// load, so at most three are ever alive.
+//
 // Two on-screen zoom presets. JMA radar + GSI base tiles exist across z4..11
 // (verified against the origins). These two give a "wide area" vs "closer in"
 // pair, clear of the z=11 edge (where some tiles 404 to blank). Tapping a
@@ -45,23 +43,26 @@ const CONN_PHONE = 1;   // Bluetooth via the phone
 const CONN_WIFI  = 2;   // the Edge's fast direct path
 // ----------------------------------------------------------------------------
 
+// The radar widget's state and control flow: settings, lifecycle, GPS, and the
+// two steps of a load (FrameListClient fetches the frame list, FramePipeline
+// the images), plus playback. RadarRenderer draws it.
 class RadarView extends WatchUi.View {
 
-    // The frame downloader (single-flight, retries, watchdog). This view is its
-    // listener (onPipelineChanged) and drives its watchdog from onTick.
-    hidden var mPipeline;
+    hidden var mFrameList;     // FrameListClient: the /frames request (step 1)
+    hidden var mPipeline;      // FramePipeline: the frame images (step 2)
+    hidden var mRenderer;      // RadarRenderer: drawing + button geometry
     hidden var mLabels as Lang.Array<Lang.String>?;       // JST "HH:MM" valid-time labels (proxy-provided, may be null)
     hidden var mOffsets as Lang.Array<Lang.Number>?;      // minutes from analysis time per frame (proxy-provided, may be null)
     hidden var mCurrent;       // frame index currently displayed
-    // One master periodic timer drives playback, the busy animation, and the
-    // transfer watchdogs. A single timer keeps us well under Connect IQ's
-    // concurrent-Timer cap (mGpsTimer is the only other one, and it never
-    // overlaps for long).
+    // The frame on screen when a refresh started. Drawn until the first new
+    // frame arrives, so a refresh doesn't blank the radar for a whole BLE load.
+    // Only one extra bitmap, and only until that first frame lands, so it stays
+    // well inside the 6-frame memory ceiling.
+    hidden var mHold;
     hidden var mTickTimer;     // master periodic timer (FRAME_MS), null when stopped
     hidden var mGpsTimer;      // Timer guarding the GPS one-shot
-    hidden var mAwaitingFrameList = false; // true while the /frames request is outstanding
-    hidden var mAwaitTicks = 0; // ticks the in-flight /frames request has been waiting (watchdog)
-    hidden var mBusyTick = 0;   // advances each tick, and drives the pulse/dots animation
+    hidden var mRefreshTimer;  // one-shot Timer for the next frame-list refresh
+    hidden var mBusyTick = 0;  // advances each tick, and drives the pulse/dots animation
     hidden var mStatus;        // user-facing status string
     hidden var mFailed;        // true once a step has failed (GPS / frame list / images), and gates the Retry button
     hidden var mSettingsError; // true on a settings problem a reload can't fix (no proxy URL / bad key)
@@ -75,11 +76,6 @@ class RadarView extends WatchUi.View {
     hidden var mZoom;
     hidden var mFrameCount;
 
-    // Cached screen size (from onLayout). Used to lay out the zoom buttons so the
-    // renderer and the tap hit-test agree on their position.
-    hidden var mW = 0;
-    hidden var mH = 0;
-
     // Loop-view lifecycle. This RadarView is the widget-carousel (loop) view. It
     // also backs the pushed detail view, which shares this instance for state and
     // rendering (see enterDetail / RadarDetailView). mActive tracks whether a
@@ -91,17 +87,26 @@ class RadarView extends WatchUi.View {
 
     function initialize() {
         View.initialize();
+        mFrameList = new FrameListClient(self, new CommsWebFetcher());
         // FrameStore persists decoded frames to Application.Storage so they
         // survive a cold start (scrolling away in the carousel stops the widget).
         mPipeline = new FramePipeline(self, new CommsImageFetcher(), new FrameStore());
+        mRenderer = new RadarRenderer(self);
         readSettings();
         resetState();
     }
 
     function onLayout(dc) {
-        mW = dc.getWidth();
-        mH = dc.getHeight();
+        mRenderer.onLayout(dc);
     }
+
+    // ---- State the renderer reads ------------------------------------------
+    function pipeline() { return mPipeline; }
+    function current() { return mCurrent; }
+    function holdBitmap() { return mHold; }
+    function status() { return mStatus; }
+    function zoom() { return mZoom; }
+    function busyTick() { return mBusyTick; }
 
     // ---- Settings ----------------------------------------------------------
     function readSettings() {
@@ -157,10 +162,12 @@ class RadarView extends WatchUi.View {
         return Util.frameCountFor(mFrameCount, connKind() == CONN_WIFI, BLE_FRAME_CAP);
     }
 
-    // Called by the app when the user edits settings in Garmin Connect.
+    // Called by the app when the user edits settings in Garmin Connect. Only
+    // reload while on screen: a hidden widget must not start GPS and network
+    // requests. The next onShow reloads with the new settings anyway.
     function onSettingsChanged() {
         readSettings();
-        reload();
+        if (mActive) { reload(); }
     }
 
     // ---- Lifecycle ---------------------------------------------------------
@@ -175,15 +182,19 @@ class RadarView extends WatchUi.View {
         reload();
     }
 
-    // Leaving the view: release GPS and stop both timers so nothing keeps
-    // running (and draining battery) while the widget is off-screen. But when
-    // the "hide" is only our own detail view being pushed on top, keep the load
-    // running (mPushingDetail) so entering the detail view is seamless.
+    // Leaving the view: release GPS, stop every timer and drop the load in
+    // flight, so nothing keeps running (and draining battery) while the widget
+    // is off-screen. Stopping the timers alone was not enough: the next image
+    // callback would pump the next request and restart the tick timer. The
+    // frame cache keeps the bitmaps, so the next onShow is still instant. But
+    // when the "hide" is only our own detail view being pushed on top, keep the
+    // load running (mPushingDetail) so entering the detail view is seamless.
     function onHide() {
         if (mPushingDetail) { mPushingDetail = false; return; }
         Position.enableLocationEvents(Position.LOCATION_DISABLE, method(:onPosition));
-        stopTickTimer();
-        stopGpsTimer();
+        stopTimers();
+        mFrameList.cancel();
+        resetLoad();
         mActive = false;
     }
 
@@ -202,21 +213,21 @@ class RadarView extends WatchUi.View {
 
     // Reset the frame load: the fetch pipeline plus this view's per-load frame
     // metadata (labels/offsets/playback position). Shared by resetState (full
-    // restart), setZoom (keeps the GPS fix) and onFrameList (which repopulates
-    // right after).
+    // restart), setZoom (keeps the GPS fix), refresh and onFrameList (which
+    // repopulates right after).
     function resetLoad() {
         mPipeline.reset();
         mLabels = null;
         mOffsets = null;
         mCurrent = 0;
+        mHold = null;
     }
 
     // Clear ALL per-load state back to a fresh "acquiring" state: the frame
     // load plus the GPS/status/failure fields the narrower resets leave alone.
     function resetState() {
+        mFrameList.cancel();
         resetLoad();
-        mAwaitingFrameList = false;
-        mAwaitTicks = 0;
         mHavePos = false;
         mFailed = false;
         mSettingsError = false;
@@ -225,12 +236,12 @@ class RadarView extends WatchUi.View {
 
     // Full restart: stop everything, clear state, re-acquire position.
     function reload() {
-        stopTickTimer();
-        stopGpsTimer();
+        stopTimers();
         resetState();
-        if (mProxyBase.length() == 0) {
-            mSettingsError = true;   // nothing to retry until a URL is set
-            mStatus = "Set Proxy URL in settings";
+        var bad = Util.settingsError(mProxyBase, mProxyKey);
+        if (bad != null) {
+            mSettingsError = true;   // nothing to retry until the settings change
+            mStatus = bad;
             WatchUi.requestUpdate();
             return;
         }
@@ -248,8 +259,10 @@ class RadarView extends WatchUi.View {
         mZoom = z;
         Application.Properties.setValue("zoom", mZoom);
         stopTickTimer();
-        if (mHavePos && mProxyBase.length() > 0) {
+        stopRefreshTimer();
+        if (mHavePos && Util.settingsError(mProxyBase, mProxyKey) == null) {
             resetLoad();   // keep the GPS fix, and just re-fetch at the new zoom
+            mFailed = false;
             mStatus = loadingText();
             requestFrameList();
             WatchUi.requestUpdate();
@@ -258,58 +271,98 @@ class RadarView extends WatchUi.View {
         }
     }
 
+    // Show a failure. A 401 is a settings problem, so no Retry button: fixing
+    // the key in the settings reloads on its own (onSettingsChanged).
+    function fail(msg as Lang.String, code as Lang.Number) as Void {
+        mStatus = msg;
+        mFailed = true;
+        if (code == 401) { mSettingsError = true; }
+        WatchUi.requestUpdate();
+    }
+
     // ---- Positioning -------------------------------------------------------
     function startPositioning() {
         // Fast path: a recent last-known fix lets us start loading immediately
         // instead of waiting for a fresh one-shot. City-zoom radar doesn't need
         // metre accuracy, so last-known is plenty to centre the view.
         var info = Position.getInfo();
-        if (info.position != null
-                && info.accuracy != Position.QUALITY_NOT_AVAILABLE) {
+        if (hasFix(info)) {
             usePosition(info);
         }
-        // Still request a fresh one-shot to refine, and guard it with a timeout.
+        // Still request a fresh one-shot to refine, and guard it with a timeout
+        // when there is no fix yet. With a fix the load has already started,
+        // so there is nothing to time out.
         Position.enableLocationEvents(Position.LOCATION_ONE_SHOT, method(:onPosition));
-        mGpsTimer = new Timer.Timer();
-        mGpsTimer.start(method(:onGpsTimeout), GPS_TIMEOUT_MS, false);
+        if (!mHavePos) {
+            mGpsTimer = new Timer.Timer();
+            mGpsTimer.start(method(:onGpsTimeout), GPS_TIMEOUT_MS, false);
+        }
+    }
+
+    function hasFix(info as Position.Info) as Lang.Boolean {
+        return info.position != null && info.accuracy != Position.QUALITY_NOT_AVAILABLE;
     }
 
     // GPS one-shot callback: record the fix (usePosition kicks off the frame
     // list on the first good one). Otherwise surface "No GPS fix" if we still
     // have nothing.
     function onPosition(info as Position.Info) as Void {
-        if (info.position != null) {
+        if (hasFix(info)) {
             // If we already fast-started from last-known, usePosition won't
             // reload – the refined fix won't move a city-zoom tile.
             usePosition(info);
         } else if (!mHavePos) {
-            mStatus = "No GPS fix";
-            mFailed = true;
+            fail("No GPS fix", 0);
         }
         WatchUi.requestUpdate();
     }
 
-    function usePosition(info) {
+    function usePosition(info as Position.Info) {
         var deg = info.position.toDegrees() as Lang.Array<Lang.Double>; // [lat, lon]
         mLat = deg[0];
         mLon = deg[1];
         mHavePos = true;
         stopGpsTimer();
-        // First usable fix: start loading. The mAwaitingFrameList guard keeps a
-        // refined fix arriving moments later from firing a duplicate /frames
-        // request while the first is still in flight.
-        if (!mPipeline.hasFrames() && !mAwaitingFrameList) {
+        // First usable fix: start loading. The isAwaiting guard keeps a refined
+        // fix arriving moments later from firing a duplicate /frames request
+        // while the first is still in flight. A fix that arrives after the GPS
+        // timeout clears the "No GPS fix" failure and loads as normal.
+        if (!mPipeline.hasFrames() && !mFrameList.isAwaiting()) {
+            mFailed = false;
             mStatus = loadingText();
             requestFrameList();
         }
     }
 
+    // The one-shot request keeps searching after this, on purpose: a fix that
+    // arrives later still starts the load (see usePosition).
     function onGpsTimeout() as Void {
         mGpsTimer = null;
         if (!mHavePos && !mPipeline.hasFrames()) {
-            mStatus = "No GPS fix";
-            mFailed = true;
-            WatchUi.requestUpdate();
+            fail("No GPS fix", 0);
+        }
+    }
+
+    // ---- Timers ------------------------------------------------------------
+    // One periodic timer covers playback animation, the busy-transfer animation,
+    // and the transfer watchdogs. Started when loading begins (the first /frames
+    // request) and kept alive only while there's something to animate: a
+    // transfer in flight, or more than one loaded frame to play. A single frame
+    // never changes, so redrawing it twice a second would only drain the battery.
+    function startTickTimer() {
+        if (mTickTimer != null) { return; }   // already running, so keep its phase
+        mTickTimer = new Timer.Timer();
+        mTickTimer.start(method(:onTick), FRAME_MS, true);
+    }
+
+    function needsTick() as Lang.Boolean {
+        return isBusy() || mPipeline.loadedCount() > 1;
+    }
+
+    function stopTickTimer() {
+        if (mTickTimer != null) {
+            mTickTimer.stop();
+            mTickTimer = null;
         }
     }
 
@@ -320,178 +373,147 @@ class RadarView extends WatchUi.View {
         }
     }
 
-    // ---- Master tick timer -------------------------------------------------
-    // One periodic timer covers playback animation, the busy-transfer animation,
-    // and the transfer watchdogs. Started when loading begins (the first /frames
-    // request) and kept alive while there's anything to animate (a transfer in
-    // flight, or loaded frames to play). Stops itself otherwise to save battery.
-    function startTickTimer() {
-        if (mTickTimer != null) { return; }   // already running, so keep its phase
-        mTickTimer = new Timer.Timer();
-        mTickTimer.start(method(:onTick), FRAME_MS, true);
+    function startRefreshTimer() {
+        if (mRefreshTimer != null) { return; }
+        mRefreshTimer = new Timer.Timer();
+        mRefreshTimer.start(method(:onRefresh), REFRESH_MS, false);
     }
 
-    function stopTickTimer() {
-        if (mTickTimer != null) {
-            mTickTimer.stop();
-            mTickTimer = null;
+    function stopRefreshTimer() {
+        if (mRefreshTimer != null) {
+            mRefreshTimer.stop();
+            mRefreshTimer = null;
         }
     }
 
-    // A transfer is in flight (frame list or an image) -> the indicator animates
-    // and a watchdog counts against it.
-    function isBusy() {
-        return mAwaitingFrameList || mPipeline.isAwaiting();
+    function stopTimers() {
+        stopTickTimer();
+        stopGpsTimer();
+        stopRefreshTimer();
     }
 
-    // Watchdog: the /frames request hasn't called back in time. Surface a
-    // transport failure so the Retry button appears instead of an indefinite
-    // "Loading radar..." hang.
-    function frameListTimedOut() {
-        if (!mAwaitingFrameList) { return; }
-        mAwaitingFrameList = false;
-        mStatus = Util.httpErrorMsg(0); // "No phone connection"
-        mFailed = true;
+    // A transfer is in flight -> the indicator animates and a watchdog counts
+    // against it.
+    function isBusy() {
+        return mFrameList.isAwaiting() || mPipeline.isAwaiting();
+    }
+
+    // ---- Refresh -----------------------------------------------------------
+    // The frame list is a snapshot: left open, the widget would keep playing
+    // radar that is 45 minutes old. Fetch a new list from the latest known
+    // position, and keep the current frame on screen until a new one arrives.
+    function onRefresh() as Void {
+        mRefreshTimer = null;
+        if (!mActive) { return; }
+        if (isBusy()) { startRefreshTimer(); return; }   // try again next period
+        var info = Position.getInfo();
+        if (hasFix(info)) {
+            var deg = info.position.toDegrees() as Lang.Array<Lang.Double>;
+            mLat = deg[0];
+            mLon = deg[1];
+        }
+        var hold = mPipeline.frameAt(mCurrent);
+        stopTickTimer();
+        resetLoad();
+        mHold = hold;
+        mStatus = "Updating radar...";
+        requestFrameList();
+        WatchUi.requestUpdate();
     }
 
     // ---- Step 1: get the ordered frame URL list from the proxy -------------
     function requestFrameList() {
-        var url = mProxyBase + "/frames";
-        var params = {
-            "lat" => mLat,
-            "lon" => mLon,
-            "z"   => mZoom,
-            "n"   => effectiveFrameCount(),
-            "key" => mProxyKey
-        };
-        var options = {
-            :method => Communications.HTTP_REQUEST_METHOD_GET,
-            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
-        };
-        // Arm the BLE watchdog before firing: if the callback never returns
-        // (hung phone link), the tick timer's count surfaces a retryable failure.
-        mAwaitingFrameList = true;
-        mAwaitTicks = 0;
-        startTickTimer();
-        Communications.makeWebRequest(url, params, options, method(:onFrameList));
+        mFrameList.request(mProxyBase, mProxyKey, mLat, mLon, mZoom, effectiveFrameCount());
+        startTickTimer();   // drives the /frames watchdog
     }
 
-    // Callback for the /frames request: validate the response, capture the
-    // labels/offsets, then hand the URL list to the pipeline (step 2), which
-    // fetches the images one at a time (see FramePipeline).
-    function onFrameList(code as Lang.Number, data as Lang.Dictionary or Lang.String or PersistedContent.Iterator or Null) as Void {
-        // Ignore a stale/late response: the watchdog may already have given this
-        // request up, or a reload superseded it.
-        if (!mAwaitingFrameList) { return; }
-        mAwaitingFrameList = false;
-        if (code != 200 || data == null || !(data has :get)) {
-            // 200 but unusable body (malformed JSON) vs an HTTP/transport error.
-            mStatus = (code == 200) ? "Bad server response" : Util.httpErrorMsg(code);
-            mFailed = true;
-            if (code == 401) { mSettingsError = true; }  // bad key -> fix in settings
-            WatchUi.requestUpdate();
-            return;
-        }
-        var frames = data.get("frames") as Lang.Array<Lang.String>?;
-        if (frames == null || frames.size() == 0) {
-            mStatus = "No frames available";
-            mFailed = true;
-            WatchUi.requestUpdate();
-            return;
-        }
-
+    // FrameListClient listener: hand the URL list to the pipeline (step 2),
+    // which fetches the images one at a time.
+    function onFrameList(frames as Lang.Array<Lang.String>, labels, offsets) as Void {
+        var hold = mHold;
         resetLoad();
-        mLabels = data.get("labels") as Lang.Array<Lang.String>?; // optional, null on older proxy
-        mOffsets = data.get("offsets") as Lang.Array<Lang.Number>?; // optional, null on older proxy
+        mHold = hold;   // keep showing it until the first new frame arrives
+        mLabels = labels;
+        mOffsets = offsets;
         mPipeline.start(frames, mProxyBase, mProxyKey);
+    }
+
+    function onFrameListFailed(code as Lang.Number, msg) as Void {
+        if (mHold != null) {
+            // A refresh failed: keep the old radar on screen and try again later.
+            mStatus = "Update failed";
+            startRefreshTimer();
+            WatchUi.requestUpdate();
+            return;
+        }
+        fail((msg != null) ? msg : frameListErrorMsg(code), code);
+    }
+
+    // The /frames watchdog reports code 0. That is a dead link only when nothing
+    // is connected. With Wi-Fi or the phone up, it just timed out.
+    hidden function frameListErrorMsg(code as Lang.Number) as Lang.String {
+        if (code == 0 && connKind() != CONN_NONE) { return "Timed out"; }
+        return Util.httpErrorMsg(code);
     }
 
     // FramePipeline listener: called after every image completion (success,
     // retry-queued failure, watchdog timeout, or a salvaged late arrival).
-    // Keep the timer alive while transfers continue – or restart it when a
-    // salvage lands after the pipeline already went idle, so playback runs –
-    // surface a terminal failure when nothing loaded at all, and repaint.
+    // Keep the timer alive while there is something to animate, surface a
+    // terminal failure when nothing loaded at all, and repaint.
     function onPipelineChanged() as Void {
-        if (mPipeline.isAwaiting() || isLoaded()) { startTickTimer(); }
+        if (!mActive) { return; }   // hidden: the load was torn down in onHide
+        if (isLoaded()) { mHold = null; }   // a new frame replaces the held one
+        if (needsTick()) { startTickTimer(); }
 
-        // All requests done (none in flight, none queued or pending retry) and
-        // nothing loaded => surface a failure instead of hanging on "Loading".
-        // Prefer the specific reason (rate-limited, server error, no connection).
-        if (mPipeline.done() && mPipeline.loadedCount() == 0) {
-            // Every frame failed, so lastCode holds the last failure's code;
-            // 0 here means a watchdog timeout, not "no failure recorded".
-            var code = mPipeline.lastCode();
-            if (code <= 0) {
-                // Transport-level failure. While the phone is connected this is
-                // the slow/flaky Garmin image service over BLE, not a dead link –
-                // don't mislabel it "No phone connection". Wi-Fi is the direct path.
-                mStatus = System.getDeviceSettings().phoneConnected
-                    ? "Timed out: try Wi-Fi"
-                    : Util.httpErrorMsg(0);   // "No phone connection"
+        if (mPipeline.done()) {
+            if (isLoaded()) {
+                // Playback may not be ticking (a single frame), so make sure the
+                // frame on screen is a loaded one, then schedule the refresh.
+                mCurrent = Util.nextFrame(mCurrent - 1, loadedFlags(), true);
+                startRefreshTimer();
             } else {
-                mStatus = Util.httpErrorMsg(code);
+                // Every frame failed, so lastCode holds the last failure's code;
+                // 0 here means a watchdog timeout, not "no failure recorded".
+                var code = mPipeline.lastCode();
+                var msg;
+                if (code == 0) {
+                    // Over BLE this is Garmin's slow or flaky image service, not
+                    // a dead link, so point at the faster path.
+                    var kind = connKind();
+                    if (kind == CONN_PHONE) { msg = "Timed out: try Wi-Fi"; }
+                    else if (kind == CONN_WIFI) { msg = "Timed out"; }
+                    else { msg = Util.httpErrorMsg(0); }
+                } else {
+                    msg = Util.httpErrorMsg(code);
+                }
+                mHold = null;
+                fail(msg, code);
             }
-            mFailed = true;
-            if (code == 401) { mSettingsError = true; }  // bad key -> fix in settings
         }
         WatchUi.requestUpdate();
     }
 
-    // ---- Master tick: animation + watchdog ---------------------------------
+    // ---- Master tick: animation + watchdogs + playback ---------------------
     // Fires every FRAME_MS while loading or playing. Three jobs: (1) advance the
-    // busy-indicator phase, (2) charge the transfer watchdogs (the pipeline
-    // handles its own, and the /frames one is counted here), (3) advance playback
-    // across loaded frames. Self-stops once there's nothing left to animate or
-    // play.
+    // busy-indicator phase, (2) charge the transfer watchdogs, (3) advance
+    // playback across loaded frames. Stops itself once there's nothing left to
+    // animate.
     function onTick() as Void {
         mBusyTick += 1;
-
-        // (2) Watchdogs. frameListTimedOut clears the awaiting flag, so it
-        // fires at most once per stuck request. The pipeline's tick() does the
-        // same for the in-flight image.
-        if (mAwaitingFrameList) {
-            mAwaitTicks += 1;
-            if (mAwaitTicks >= FRAMES_TIMEOUT_TICKS) {
-                mAwaitTicks = 0;
-                frameListTimedOut();
-            }
-        }
+        mFrameList.tick();
         mPipeline.tick();
-
-        // (3) Advance playback across the frames loaded so far. Frames stream in
-        // oldest->newest. If we looped the whole set while still loading, playback
-        // would wrap from the newest-loaded frame back to -15m every lap, so the
-        // time appears to jump around. Instead, while loading, only ever move
-        // *forwards* to the next loaded frame and hold on the leading edge until a
-        // newer one arrives – the time climbs monotonically. We resume normal
-        // wrap-around looping once loading is done (all requests attempted), so a
-        // failed/missing frame can't freeze playback at a permanent gap.
         if (mPipeline.hasFrames()) {
-            var n = mPipeline.size();
-            var loadingDone = mPipeline.done();
-
-            var next = -1;
-            for (var i = mCurrent + 1; i < n; i += 1) {
-                if (mPipeline.isFrameLoaded(i)) { next = i; break; }
-            }
-
-            if (next != -1) {
-                mCurrent = next;
-            } else if (loadingDone) {
-                // Wrap to the first loaded frame to loop the full set.
-                for (var i = 0; i < n; i += 1) {
-                    if (mPipeline.isFrameLoaded(i)) { mCurrent = i; break; }
-                }
-            }
-            // else: still loading with nothing newer ready -> hold on the edge.
+            mCurrent = Util.nextFrame(mCurrent, loadedFlags(), mPipeline.done());
         }
-
         WatchUi.requestUpdate();
+        if (!needsTick()) { stopTickTimer(); }
+    }
 
-        // Nothing left to animate (no transfer in flight) and nothing to play
-        // (no loaded frame) -> stop the timer to save battery. Playback keeps it
-        // alive via isLoaded(). A terminal failure with no frames lets it stop.
-        if (!isBusy() && !isLoaded()) { stopTickTimer(); }
+    hidden function loadedFlags() as Lang.Array<Lang.Boolean> {
+        var n = mPipeline.size();
+        var flags = new [n];
+        for (var i = 0; i < n; i += 1) { flags[i] = mPipeline.isFrameLoaded(i); }
+        return flags;
     }
 
     // ---- Render ------------------------------------------------------------
@@ -502,166 +524,18 @@ class RadarView extends WatchUi.View {
     }
 
     function draw(dc) {
-        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
-        dc.clear();
-
-        var bmp = mPipeline.frameAt(mCurrent);
-        if (bmp != null) {
-            drawRadarScreen(dc, bmp);
-        } else {
-            drawLoadingScreen(dc);
-        }
-
-        // Bottom control, drawn last so it sits on top: the Wide/Local zoom
-        // selector once a frame has loaded (both shown, the current level
-        // highlighted), or a Retry button once a step has failed. While still
-        // acquiring GPS / loading, neither shows.
-        if (isLoaded()) {
-            drawZoomButtons(dc);
-        } else if (canRetry()) {
-            drawBottomButton(dc, "Retry");
-        }
-    }
-
-    // Radar branch of the render: the current frame with its title row, the
-    // rider marker, the per-frame progress bar while frames are still arriving,
-    // and the attribution line.
-    function drawRadarScreen(dc, bmp) {
-        var w = dc.getWidth();
-        var fhTiny = dc.getFontHeight(Graphics.FONT_XTINY);
-        var bx = (w - bmp.getWidth()) / 2;
-
-        // Distribute the screen evenly rather than centring the image (which
-        // left the top sparse and the bottom crowded). Three equal gaps:
-        // top labels -> image, image -> attribution, attribution -> buttons.
-        // This nudges the radar image up from dead-centre.
-        var topEnd = 4 + fhTiny;               // bottom of the frame-index / time row
-        var btnTop = bottomButtonRect()[1];    // top edge of the bottom buttons (shared edge)
-        var gap = (btnTop - topEnd - bmp.getHeight() - fhTiny) / 3;
-        if (gap < 0) { gap = 0; }
-        var by = topEnd + gap;
-        dc.drawBitmap(bx, by, bmp);
-
-        // Rider marker at the image centre (the proxy may also bake one in,
-        // so this
-        // is a UI fallback).
-        dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(w / 2, by + bmp.getHeight() / 2, 3);
-
-        // Playback starts at 2 frames, so the rest keep downloading in the
-        // background. Keep a thin segmented bar pinned to the top edge until
-        // every frame has arrived: one cell per frame, the in-flight cell
-        // pulsing, so the user can see each remaining transfer continue.
-        if (mPipeline.loadedCount() < mPipeline.size()) {
-            drawSegmentedBar(dc, 0, 0, w, 3, mPipeline.size(), mPipeline.inflightIndex());
-        }
-
-        // Centred title row: the frame index plus the frame's own JST valid
-        // time and its fixed offset from the analysis time, for example
-        // "2/3  22:40 +15m" (forecast) or "2/3  22:25 now" (latest observed).
-        // The time/offset come from the proxy, so they're stable and
-        // independent of the device clock / timezone.
-        var title = (mCurrent + 1) + "/" + mPipeline.size();
-        var label = currentLabel();
-        if (label != null) {
-            title = title + "   " + label;
-            var off = currentOffset();
-            if (off != null) {
-                title = title + " " + Util.offsetStr(off);
-            }
-        }
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, 4, Graphics.FONT_XTINY, title,
-            Graphics.TEXT_JUSTIFY_CENTER);
-
-        // Mandatory attribution, one line, centred below the radar image.
-        // Romanized because the device system font carries no CJK glyphs when
-        // the device language is not Japanese. Both required elements are
-        // kept: JMA's "processed" notice (加工して利用, because we composite and
-        // crop the
-        // tiles) and the GSI base-map credit. Sits in the gap between the
-        // bottom of the image and the top of the zoom buttons.
-        var imgBottom = by + bmp.getHeight();
-        var attrY = (imgBottom + btnTop) / 2;
-        dc.drawText(w / 2, attrY, Graphics.FONT_XTINY,
-            "JMA Weather (processed) · GSI Map",
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-    }
-
-    // Loading/status branch of the render: status line, optional download
-    // progress (or activity dots), and the load-time disclaimer – measured and
-    // drawn as one block that is vertically centred on the screen.
-    function drawLoadingScreen(dc) {
-        var w = dc.getWidth();
-        var h = dc.getHeight();
-        var fhSmall = dc.getFontHeight(Graphics.FONT_SMALL);
-        var fhTiny = dc.getFontHeight(Graphics.FONT_XTINY);
-        var hasProg = mPipeline.size() > 0;
-        // Before the frame list arrives there's no per-frame progress to show,
-        // so a transfer in flight (the /frames fetch) gets animated dots.
-        var showDots = !hasProg && isBusy();
-        var dotsH = 5;
-        var gap = 6;
-        var headGap = 16;   // breathing room between the status line and the indicator below it
-
-        var stackH = fhSmall;                                  // status
-        if (hasProg) { stackH += headGap + fhTiny + gap + 6; } // count + bar
-        else if (showDots) { stackH += headGap + dotsH; }      // activity dots
-        stackH += gap * 4 + fhTiny + gap + fhTiny * 3;         // separation, 'Disclaimer' title, gap, 3 lines
-
-        // Top of the centred stack. Each element is top-justified and y
-        // advances by its height.
-        var y = (h - stackH) / 2;
-
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_SMALL, mStatus,
-            Graphics.TEXT_JUSTIFY_CENTER);
-        y += fhSmall;
-
-        // Once the frame list is known, show download progress under the
-        // status: a "loaded / total" count plus a bar, so the wait while
-        // the first frames stream over BLE isn't a blank "Loading..." screen.
-        if (hasProg) {
-            y += headGap;
-            dc.drawText(w / 2, y, Graphics.FONT_XTINY,
-                mPipeline.loadedCount() + " / " + mPipeline.size(),
-                Graphics.TEXT_JUSTIFY_CENTER);
-            y += fhTiny + gap;
-            var barW = w / 2;
-            drawSegmentedBar(dc, (w - barW) / 2, y, barW, 6,
-                mPipeline.size(), mPipeline.inflightIndex());
-            y += 6;
-        } else if (showDots) {
-            y += headGap;
-            drawActivityDots(dc, w / 2, y + dotsH / 2);
-            y += dotsH;
-        }
-
-        // Load-time disclaimer: this is informational radar, not a safety
-        // tool. Hardcoded + romanised (like the credit line) since device
-        // fonts lack CJK glyphs. Set apart from the status/progress above by
-        // a wider gap and a "Disclaimer" heading. Clears once the first frame
-        // draws and the view switches to the radar branch.
-        y += gap * 4;   // wider separation from the loading messages
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_XTINY,
-            "Disclaimer", Graphics.TEXT_JUSTIFY_CENTER);
-        y += fhTiny + gap;
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, y, Graphics.FONT_XTINY,
-            "For information only.", Graphics.TEXT_JUSTIFY_CENTER);
-        y += fhTiny;
-        dc.drawText(w / 2, y, Graphics.FONT_XTINY,
-            "Data may be delayed or", Graphics.TEXT_JUSTIFY_CENTER);
-        y += fhTiny;
-        dc.drawText(w / 2, y, Graphics.FONT_XTINY,
-            "unavailable. Not for safety.", Graphics.TEXT_JUSTIFY_CENTER);
+        mRenderer.draw(dc);
     }
 
     // True once at least one radar frame has loaded – that is, a successful load.
-    // The zoom toggle is gated on this. Before it, the bottom shows Retry.
     function isLoaded() {
         return mPipeline.loadedCount() > 0;
+    }
+
+    // Radar is on screen: a loaded frame, or the frame held during a refresh.
+    // The zoom buttons show while this is true. Before it, the bottom shows Retry.
+    function hasRadar() {
+        return isLoaded() || mHold != null;
     }
 
     // Whether a Retry makes sense: a step has actually failed (so we're not just
@@ -670,78 +544,7 @@ class RadarView extends WatchUi.View {
     // reloads automatically (onSettingsChanged). While still acquiring GPS or
     // loading frames, mFailed is false, so no Retry button shows.
     function canRetry() {
-        return mFailed && !isLoaded() && !mSettingsError;
-    }
-
-    // ---- Bottom buttons ----------------------------------------------------
-    // The bottom edge holds one of two controls: the Wide/Local zoom selector
-    // (both shown, current highlighted) once radar is showing, or a single
-    // Retry button after a failure. All share this bottom edge.
-    //
-    // Interaction note: the carousel (loop) view never gets coordinate-bearing
-    // taps, but the pushed detail view does (see enterDetail / RadarDetailView).
-    // These rects are the shared geometry the detail view's onTap hit-tests
-    // (onScreenTap), so a tap switches straight to the tapped level and a press
-    // off both buttons does nothing.
-
-    // One centred button (Retry), pinned to the bottom edge.
-    function bottomButtonRect() as Lang.Array<Lang.Number> {
-        var bw = (mW * 6) / 10;          // ~60% of the width, centred
-        var bh = 30;
-        var bx = (mW - bw) / 2;
-        var by = mH - bh - 8;            // pinned to the bottom edge of the screen
-        return [bx, by, bw, bh];
-    }
-
-    function drawBottomButton(dc, label) {
-        if (mW <= 0) { return; }
-        var r = bottomButtonRect();
-        var x = r[0]; var y = r[1]; var bw = r[2]; var bh = r[3];
-        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(x, y, bw, bh, 4);
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + bw / 2, y + bh / 2, Graphics.FONT_XTINY, label,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-    }
-
-    // The two zoom-selector buttons [left=Wide, right=Local], same bottom edge
-    // as the Retry button. Geometry is shared by the renderer and the tap
-    // hit-test (onScreenTap) so they can't drift.
-    function zoomButtonRects() as Lang.Array<Lang.Array<Lang.Number>> {
-        var bw = (mW * 4) / 10;          // each button ~40% of the width
-        var bh = 30;
-        var gap = mW / 20;
-        var bx = (mW - (bw * 2 + gap)) / 2;
-        var by = mH - bh - 8;            // same bottom edge as bottomButtonRect
-        return [
-            [bx, by, bw, bh],                 // left  -> Wide
-            [bx + bw + gap, by, bw, bh]       // right -> Local
-        ];
-    }
-
-    function drawZoomButtons(dc) {
-        if (mW <= 0) { return; }
-        var r = zoomButtonRects();
-        drawZoomButton(dc, r[0], "Wide", mZoom == ZOOM_WIDE);
-        drawZoomButton(dc, r[1], "Local", mZoom == ZOOM_LOCAL);
-    }
-
-    // A selected button is filled blue with white text (the current level). An
-    // unselected one is a grey outline with grey text (the level a tap switches
-    // to).
-    function drawZoomButton(dc, r as Lang.Array<Lang.Number>, label, selected) {
-        var x = r[0]; var y = r[1]; var bw = r[2]; var bh = r[3];
-        if (selected) {
-            dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
-            dc.fillRoundedRectangle(x, y, bw, bh, 4);
-            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        } else {
-            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawRoundedRectangle(x, y, bw, bh, 4);
-            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        }
-        dc.drawText(x + bw / 2, y + bh / 2, Graphics.FONT_XTINY, label,
-            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        return mFailed && !hasRadar() && !mSettingsError;
     }
 
     // Touch dispatch from the detail view's delegate (onTap, with coordinates).
@@ -750,14 +553,14 @@ class RadarView extends WatchUi.View {
     // the tapped zoom level (tapping the current level, or missing both, does
     // nothing), or triggers Retry after a failure.
     function onScreenTap(x, y) {
-        if (mW <= 0) { return false; }
-        // Before a successful load the only control is the Retry button (and
+        if (!mRenderer.hasLayout()) { return false; }
+        // Before any radar shows, the only control is the Retry button (and
         // only when a retry could help).
-        if (!isLoaded()) {
-            if (canRetry() && hitTest(bottomButtonRect(), x, y)) { reload(); return true; }
+        if (!hasRadar()) {
+            if (canRetry() && hitTest(mRenderer.bottomButtonRect(), x, y)) { reload(); return true; }
             return false;
         }
-        var r = zoomButtonRects();
+        var r = mRenderer.zoomButtonRects() as Lang.Array<Lang.Array<Lang.Number>>;
         if (hitTest(r[0], x, y)) { setZoom(ZOOM_WIDE); return true; }   // no-op if already Wide
         if (hitTest(r[1], x, y)) { setZoom(ZOOM_LOCAL); return true; }  // no-op if already Local
         return false;
@@ -765,56 +568,6 @@ class RadarView extends WatchUi.View {
 
     function hitTest(r as Lang.Array<Lang.Number>, x, y) {
         return x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3];
-    }
-
-    // Draw a per-frame progress bar: one cell per frame so each transfer is
-    // visible individually. A loaded cell is solid white (done). A permanently
-    // failed cell (out of retries / non-retryable) is solid red – it can still
-    // turn white later if an abandoned transfer's late arrival is salvaged. The
-    // in-flight cell (activeIdx) pulses between two greys so the active
-    // transfer reads as "working". A not-yet-started cell is a dim outline.
-    // Used both on the loading screen and as a slim top-edge indicator during
-    // playback.
-    function drawSegmentedBar(dc, x, y, w, h, n, activeIdx) {
-        if (n <= 0) { return; }
-        var sgap = (n > 1) ? 2 : 0;
-        var cellW = (w - sgap * (n - 1)) / n;
-        if (cellW < 1) { cellW = 1; }
-        var blinkOn = (mBusyTick % 2) == 0;
-        var cx = x;
-        for (var i = 0; i < n; i += 1) {
-            if (mPipeline.isFrameLoaded(i)) {
-                dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-                dc.fillRectangle(cx, y, cellW, h);
-            } else if (mPipeline.isFrameFailed(i)) {
-                dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
-                dc.fillRectangle(cx, y, cellW, h);
-            } else if (i == activeIdx) {
-                dc.setColor(blinkOn ? Graphics.COLOR_LT_GRAY : Graphics.COLOR_DK_GRAY,
-                    Graphics.COLOR_TRANSPARENT);
-                dc.fillRectangle(cx, y, cellW, h);
-            } else {
-                dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-                dc.drawRectangle(cx, y, cellW, h);
-            }
-            cx += cellW + sgap;
-        }
-    }
-
-    // Indeterminate "working" indicator: three dots with the highlight cycling
-    // across them. Shown while a transfer is in flight but there's no per-frame
-    // progress yet (the /frames request, before the frame count is known).
-    function drawActivityDots(dc, cx, cy) {
-        var dots = 3;
-        var r = 2;
-        var spacing = 8;
-        var startX = cx - ((dots - 1) * spacing) / 2;
-        var active = mBusyTick % dots;
-        for (var i = 0; i < dots; i += 1) {
-            dc.setColor((i == active) ? Graphics.COLOR_WHITE : Graphics.COLOR_DK_GRAY,
-                Graphics.COLOR_TRANSPARENT);
-            dc.fillCircle(startX + i * spacing, cy, r);
-        }
     }
 
     // The proxy-provided label for the current frame, if available.
@@ -833,5 +586,4 @@ class RadarView extends WatchUi.View {
         }
         return null;
     }
-
 }
